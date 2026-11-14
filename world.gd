@@ -3,9 +3,9 @@ extends Node
 const PlaneMovementScript = preload("res://scripts/plane/plane_movement.gd")
 const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 
-@export var initial_speed: float = 100.0
+@export var initial_speed: float = 600.0
 @export var initial_direction: Vector2 = Vector2.RIGHT
-@export var max_speed: float = 20000.0
+@export var max_speed: float = 10000.0
 
 @export var plane_path: NodePath = ^"CharacterBody2D"
 @export var tile_map_path: NodePath = ^"TileMapLayer2"

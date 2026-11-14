@@ -1,5 +1,5 @@
 extends RefCounted
-
+extends CharacterBody2D
 
 const MAX_BOUNCES_PER_FRAME: int = 64
 
@@ -57,7 +57,7 @@ static func advance(
 			position.y = clampf(position.y, bounds.position.y, bounds.end.y)
 			time_left -= time_to_edge
 			direction = -direction
-			speed = minf(speed * 2.0, maximum_speed)
+			speed = minf(speed * 1.6767, maximum_speed)
 			bounce_count += 1
 
 	return {
