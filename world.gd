@@ -25,6 +25,20 @@ const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 @export var minimum_spawn_interval: float = 2.0
 @export var spawn_margin: float = 48.0
 
+@export_group("Fighter Ultimate")
+@export var fighter_plane_path: NodePath = ^"fighterplane"
+@export var fighter_flight_speed: float = 850.0
+@export var fighter_shoot_radius: float = 65.0
+@export var fighter_shoot_cooldown: float = 0.25
+@export var ultimate_duration: float = 20.0
+@export var fighter_visual_rotation_offset_degrees: float = 0.0
+
+const FighterControllerScript = preload("res://scripts/plane/fighter_controller.gd")
+
+var fighter_controller: Node
+var ultimate_active: bool = false
+var ultimate_time_left: float = 0.0
+
 var plane: CharacterBody2D
 var world_bounds: Rect2
 var bounds: WorldBounds
@@ -115,14 +129,102 @@ func _ready() -> void:
 	plane.global_position = bounds.clamp_position(plane.global_position)
 	plane.rotation = _rotation_for_direction(first_direction)
 	_register_aircraft(plane, first_direction, minf(initial_speed, max_speed))
+	_setup_fighter_controller()
+
+
+func _process(delta: float) -> void:
+	if not ultimate_active:
+		return
+
+	ultimate_time_left -= delta
+	if ultimate_time_left <= 0.0:
+		_end_ultimate()
 
 
 func _physics_process(delta: float) -> void:
-	elapsed_game_time += delta
-	spawn_clock += delta
+	# Freeze traffic progression and spawning during the fighter deployment.
+	# Existing aircraft continue flying normally.
+	if not ultimate_active:
+		elapsed_game_time += delta
+		spawn_clock += delta
 
 	_update_aircraft(delta)
-	_try_spawn_aircraft()
+
+	if not ultimate_active:
+		_try_spawn_aircraft()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Temporary test control. Landing-count unlocks will be connected later.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
+		_activate_ultimate()
+
+
+func _setup_fighter_controller() -> void:
+	var fighter_plane := get_node_or_null(fighter_plane_path) as CharacterBody2D
+	if fighter_plane == null:
+		push_warning("World: fighterplane not found at fighter_plane_path: " + str(fighter_plane_path))
+		return
+
+	fighter_controller = FighterControllerScript.new()
+	add_child(fighter_controller)
+	fighter_controller.setup(
+		self,
+		fighter_plane,
+		fighter_flight_speed,
+		fighter_shoot_radius,
+		fighter_shoot_cooldown,
+		fighter_visual_rotation_offset_degrees
+	)
+
+
+func _activate_ultimate() -> void:
+	if ultimate_active or fighter_controller == null:
+		return
+
+	ultimate_active = true
+	ultimate_time_left = ultimate_duration
+	fighter_controller.activate()
+	print("Fighter deployed! ", ultimate_duration, " seconds.")
+
+
+func _end_ultimate() -> void:
+	ultimate_active = false
+	ultimate_time_left = 0.0
+
+	if fighter_controller != null:
+		fighter_controller.deactivate()
+
+	print("Fighter deployment ended. Normal traffic spawning resumed.")
+
+
+func try_shoot_aircraft(target_position: Vector2, shoot_radius: float) -> void:
+	if not ultimate_active:
+		return
+
+	var closest_index := -1
+	var closest_distance := shoot_radius
+
+	for i in range(aircraft.size()):
+		var state: Dictionary = aircraft[i]
+		var target_plane := state["plane"] as CharacterBody2D
+
+		if not is_instance_valid(target_plane) or target_plane == plane:
+			continue
+
+		var distance := target_plane.global_position.distance_to(target_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_index = i
+
+	if closest_index == -1:
+		return
+
+	var target_state: Dictionary = aircraft[closest_index]
+	var target_plane := target_state["plane"] as CharacterBody2D
+	aircraft.remove_at(closest_index)
+	target_plane.queue_free()
+	print("Arcade intercept! Remaining traffic: ", aircraft.size())
 
 
 func _register_aircraft(new_plane: CharacterBody2D, start_direction: Vector2, start_speed: float) -> void:
