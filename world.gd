@@ -179,12 +179,14 @@ func _physics_process(delta: float) -> void:
 		elapsed_game_time += delta
 		spawn_clock += delta
 
+	# Update traffic first; the primary aircraft is skipped by the generic
+	# updater while it is following a route or has already landed.
+	_update_aircraft(delta)
+
 	if not plane_landed and route_confirmed:
 		_follow_drawn_route(delta)
 		_update_movement_audio(movement_audio, current_speed)
 		_sync_primary_aircraft_state()
-	else:
-		_update_aircraft(delta)
 
 	if not ultimate_active:
 		_try_spawn_aircraft()
