@@ -17,6 +17,23 @@ func setup(
 	flight_speed = new_flight_speed
 	visual_rotation_offset_degrees = new_rotation_offset_degrees
 
+	# The scene's legacy fighter script also handled movement/input.
+	# Remove it so this controller is the single owner of fighter behaviour.
+	fighter_plane.set_script(null)
+
+	var fighter_sprite := fighter_plane.get_node_or_null("Sprite2D") as Sprite2D
+	if fighter_sprite != null:
+		fighter_sprite.position = Vector2.ZERO
+
+	var fighter_collision := fighter_plane.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if fighter_collision != null:
+		fighter_collision.position = Vector2.ZERO
+		fighter_collision.rotation = 0.0
+		fighter_collision.scale = Vector2.ONE
+		if fighter_collision.shape is RectangleShape2D:
+			fighter_collision.shape = fighter_collision.shape.duplicate()
+			(fighter_collision.shape as RectangleShape2D).size = Vector2(60, 50)
+
 	fighter_plane.velocity = Vector2.ZERO
 	fighter_plane.hide()
 	fighter_plane.set_physics_process(false)
