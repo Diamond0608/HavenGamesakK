@@ -49,13 +49,22 @@ animations = [{
 size = Vector2(60, 50)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_gdvcf"]
-size = Vector2(562.5563, 61.683502)
+size = Vector2(90.848145, 55.19464)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_om0mj"]
+size = Vector2(105.0061, 61.759888)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_bjt1f"]
-size = Vector2(561.58105, 61.836166)
+size = Vector2(91.07773, 60.232998)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_enpno"]
+size = Vector2(92.05287, 57.56105)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_guio7"]
-size = Vector2(113.929085, 494.5644)
+size = Vector2(92.040665, 128.35803)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_je1wo"]
+size = Vector2(121.32024, 115.66484)
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_gbfbk"]
 texture = ExtResource("2_036b0")
@@ -1283,13 +1292,17 @@ scale = Vector2(-10.49461, -13.099127)
 script = ExtResource("2_wse8f")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="AirportnewRemovebgPreview" unique_id=1021216443]
-position = Vector2(-0.04876709, -151.61328)
+position = Vector2(-235.90282, -154.85773)
 shape = SubResource("RectangleShape2D_gdvcf")
 
 [node name="Sprite2D" type="Sprite2D" parent="AirportnewRemovebgPreview" unique_id=2050145229]
 z_as_relative = false
 position = Vector2(3.315464, -4.198761)
 texture = ExtResource("2_gbfbk")
+
+[node name="CollisionShape2D2" type="CollisionShape2D" parent="AirportnewRemovebgPreview" unique_id=1812584420]
+position = Vector2(230.49927, -158.14037)
+shape = SubResource("RectangleShape2D_om0mj")
 
 [node name="AirportnewRemovebgPreview2" type="Area2D" parent="." unique_id=671791609]
 position = Vector2(2067, -6293)
@@ -1302,8 +1315,12 @@ z_as_relative = false
 texture = ExtResource("2_gbfbk")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="AirportnewRemovebgPreview2" unique_id=1915750695]
-position = Vector2(8.678707, -150.23903)
+position = Vector2(-237.0557, -151.04059)
 shape = SubResource("RectangleShape2D_bjt1f")
+
+[node name="CollisionShape2D2" type="CollisionShape2D" parent="AirportnewRemovebgPreview2" unique_id=403320225]
+position = Vector2(235.69049, -148.94122)
+shape = SubResource("RectangleShape2D_enpno")
 
 [node name="AircraftCarrierNewRemovebgPreview" type="Area2D" parent="." unique_id=972802341]
 z_index = 1
@@ -1314,12 +1331,17 @@ scale = Vector2(-13.092228, 11.51053)
 script = ExtResource("5_k3n1d")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="AircraftCarrierNewRemovebgPreview" unique_id=1045407986]
-position = Vector2(-4.1346283, 3.5156403)
-scale = Vector2(1.0000005, 1.0000001)
+position = Vector2(6.809616, -179.5876)
+scale = Vector2(1.0000006, 1.0000001)
 shape = SubResource("RectangleShape2D_guio7")
 
 [node name="Sprite2D" type="Sprite2D" parent="AircraftCarrierNewRemovebgPreview" unique_id=33215964]
 texture = ExtResource("3_ioo17")
+
+[node name="CollisionShape2D2" type="CollisionShape2D" parent="AircraftCarrierNewRemovebgPreview" unique_id=601429970]
+position = Vector2(-7.972336, 201.83453)
+scale = Vector2(1.0000002, 1.0000001)
+shape = SubResource("RectangleShape2D_je1wo")
 
 [node name="TileMapLayer2" type="TileMapLayer" parent="." unique_id=1704737746]
 z_index = -10
@@ -1347,7 +1369,7 @@ shape = SubResource("RectangleShape2D_rtept")
 [node name="Camera2D" type="Camera2D" parent="." unique_id=384358701]
 position = Vector2(-773, -1015)
 scale = Vector2(235.35208, -12.039631)
-zoom = Vector2(0.06, 0.06)
+zoom = Vector2(-0.04, -0.04)
 
 [node name="Airportterminals" type="Sprite2D" parent="." unique_id=807302641]
 position = Vector2(-3244, -3056)
