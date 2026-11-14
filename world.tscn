@@ -15,6 +15,7 @@
 [ext_resource type="Script" uid="uid://cgr87fqvys7xv" path="res://fighterplane.gd" id="13_70uel"]
 [ext_resource type="Texture2D" uid="uid://dome1hn00gr4b" path="res://fighterplane-removebg-preview.png" id="13_fighter_texture"]
 [ext_resource type="Texture2D" uid="uid://bk8q4pifkd6k5" path="res://plane2.png" id="13_plane2"]
+[ext_resource type="Texture2D" uid="uid://m07ap0tyvpqf" path="res://spritesplane.png" id="16_2u3nc"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_pkg7o"]
 atlas = ExtResource("1_dwbse")
@@ -1246,6 +1247,35 @@ size = Vector2(71.63482, 64.89389)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_sbf0h"]
 size = Vector2(13910.18, 109.37645)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_udxuc"]
+atlas = ExtResource("16_2u3nc")
+region = Rect2(2, 419, 31, 31)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ikiii"]
+atlas = ExtResource("16_2u3nc")
+region = Rect2(33, 419, 31, 31)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cbp6q"]
+atlas = ExtResource("16_2u3nc")
+region = Rect2(64, 419, 31, 31)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_vgx5x"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_udxuc")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ikiii")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_cbp6q")
+}],
+"loop": 1,
+"name": &"default",
+"speed": 3.0
+}]
+
 [node name="World" type="Node" unique_id=494113563]
 script = ExtResource("1_pkg7o")
 
@@ -1377,3 +1407,8 @@ shape = SubResource("RectangleShape2D_sbf0h")
 [node name="CharacterBody2D3" type="CharacterBody2D" parent="." unique_id=1841766994]
 rotation = 1.5693129
 scale = Vector2(13, 13)
+
+[node name="ExplosionTemplate" type="AnimatedSprite2D" parent="." unique_id=923983107]
+scale = Vector2(20, 20)
+sprite_frames = SubResource("SpriteFrames_vgx5x")
+frame_progress = 0.5746641

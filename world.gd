@@ -2,6 +2,7 @@ extends Node
 
 const PlaneMovementScript = preload("res://scripts/plane/plane_movement.gd")
 const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
+const AircraftCollisionManagerScript = preload("res://scripts/plane/aircraft_collision_manager.gd")
 
 @export var initial_speed: float = 600.0
 @export var initial_direction: Vector2 = Vector2.RIGHT
@@ -42,11 +43,13 @@ var total_landings: int = 0
 var fighter_charges: int = 0
 
 var plane: CharacterBody2D
+var aircraft_template: CharacterBody2D
 var world_bounds: Rect2
 var bounds: WorldBounds
 var direction: Vector2 = Vector2.RIGHT
 var current_speed: float = 600.0
 var movement_audio: AudioStreamPlayer2D
+var aircraft_collision_manager: Node
 
 # Each entry stores the independent movement state for one aircraft.
 var aircraft: Array[Dictionary] = []
@@ -156,6 +159,13 @@ func _ready() -> void:
 		first_direction = Vector2.RIGHT
 
 	plane.global_position = bounds.clamp_position(plane.global_position)
+	aircraft_template = plane.duplicate() as CharacterBody2D
+	if aircraft_template == null:
+		push_error("World: Could not create an aircraft spawn template.")
+		set_physics_process(false)
+		return
+	aircraft_template.name = "AircraftTemplate"
+	aircraft_template.hide()
 	route_plane = plane
 	plane.rotation = _rotation_for_direction(first_direction)
 	direction = first_direction
@@ -165,6 +175,7 @@ func _ready() -> void:
 	_register_aircraft(plane, first_direction, current_speed)
 	_setup_route_ui()
 	_setup_fighter_controller()
+	_setup_aircraft_collision_manager()
 
 
 func _process(delta: float) -> void:
@@ -192,6 +203,9 @@ func _physics_process(delta: float) -> void:
 		var route_audio := route_plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
 		_update_movement_audio(route_audio, route_speed)
 		_sync_routed_aircraft_state()
+
+	if aircraft_collision_manager != null:
+		aircraft_collision_manager.check_collisions(aircraft)
 
 	if not ultimate_active:
 		_try_spawn_aircraft()
@@ -239,6 +253,30 @@ func _setup_fighter_controller() -> void:
 		fighter_flight_speed,
 		fighter_visual_rotation_offset_degrees
 	)
+
+
+func _setup_aircraft_collision_manager() -> void:
+	var explosion_template := get_node_or_null("ExplosionTemplate") as AnimatedSprite2D
+	if explosion_template != null:
+		explosion_template.hide()
+	aircraft_collision_manager = AircraftCollisionManagerScript.new()
+	add_child(aircraft_collision_manager)
+	aircraft_collision_manager.setup(self, explosion_template)
+
+
+func _on_aircraft_collision(
+	first_plane: CharacterBody2D,
+	second_plane: CharacterBody2D,
+	impact_position: Vector2
+) -> void:
+	if route_plane == first_plane or route_plane == second_plane:
+		route_confirmed = false
+		active_runway = null
+		if route_line:
+			route_line.hide()
+	if plane == first_plane or plane == second_plane:
+		plane_landed = true
+	print("Aircraft collision at ", impact_position, ". Both aircraft destroyed.")
 
 
 
@@ -336,15 +374,18 @@ func _get_current_spawn_interval() -> float:
 
 
 func _spawn_aircraft() -> void:
-	# Duplicate the existing plane node so its sprite, collision shape and
-	# audio stream stay identical to the aircraft already in the scene.
-	var new_plane := plane.duplicate() as CharacterBody2D
+	# Use a retained copy so spawning still works after the primary aircraft is destroyed.
+	if not is_instance_valid(aircraft_template):
+		push_error("World: Aircraft spawn template is no longer available.")
+		return
+	var new_plane := aircraft_template.duplicate() as CharacterBody2D
 
 	if new_plane == null:
 		push_error("World: Could not duplicate the existing plane.")
 		return
 
 	new_plane.name = "Aircraft_%02d" % (aircraft.size() + 1)
+	new_plane.show()
 
 	# Only the original aircraft should control the shared camera.
 	var camera := new_plane.get_node_or_null("Camera2D") as Camera2D
