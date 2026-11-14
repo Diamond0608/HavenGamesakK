@@ -322,6 +322,10 @@ func _update_aircraft(delta: float) -> void:
 		# keeps the sprite aligned after every 180-degree boundary bounce.
 		aircraft_node.rotation = _rotation_for_direction(state["direction"])
 
+		if aircraft_node == plane:
+			direction = state["direction"]
+			current_speed = state["speed"]
+
 		_update_movement_audio(state["audio"], state["speed"])
 		aircraft[i] = state
 
