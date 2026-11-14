@@ -1,5 +1,4 @@
 extends RefCounted
-class_name PlaneMovement
 
 
 const MAX_BOUNCES_PER_FRAME: int = 64

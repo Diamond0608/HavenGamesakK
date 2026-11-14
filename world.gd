@@ -1,7 +1,7 @@
 extends Node
 
-const PlaneMovement = preload("res://scripts/plane/plane_movement.gd")
-const WorldBounds = preload("res://scripts/world/world_bounds.gd")
+const PlaneMovementScript = preload("res://scripts/plane/plane_movement.gd")
+const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 
 @export var world_bounds: Rect2 = Rect2(
 	Vector2(-808, -488),
@@ -17,7 +17,7 @@ const WorldBounds = preload("res://scripts/world/world_bounds.gd")
 var plane: CharacterBody2D
 var current_speed: float
 var direction: Vector2
-var bounds: RefCounted
+var bounds
 
 
 func _ready() -> void:
@@ -28,7 +28,7 @@ func _ready() -> void:
 		set_physics_process(false)
 		return
 
-	bounds = WorldBounds.new(world_bounds)
+	bounds = WorldBoundsScript.new(world_bounds)
 
 	if not bounds.is_valid():
 		push_error("World: world_bounds must have a positive width and height.")
@@ -50,7 +50,7 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	var result: Dictionary = PlaneMovement.advance(
+	var result: Dictionary = PlaneMovementScript.advance(
 		plane.global_position,
 		direction,
 		current_speed,
@@ -59,9 +59,9 @@ func _physics_process(delta: float) -> void:
 		max_speed
 	)
 
-	plane.global_position = result.position
-	direction = result.direction
-	current_speed = result.speed
+	plane.global_position = result["position"]
+	direction = result["direction"]
+	current_speed = result["speed"]
 
-	if result.bounces > 0:
-		plane.rotation += PI * float(result.bounces)
+	if result["bounces"] > 0:
+		plane.rotation += PI * float(result["bounces"])
