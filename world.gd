@@ -30,8 +30,6 @@ const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 @export_group("Fighter Ultimate")
 @export var fighter_plane_path: NodePath = ^"fighterplane"
 @export var fighter_flight_speed: float = 850.0
-@export var fighter_shoot_radius: float = 65.0
-@export var fighter_shoot_cooldown: float = 0.25
 @export var ultimate_duration: float = 20.0
 @export var fighter_visual_rotation_offset_degrees: float = 0.0
 
@@ -40,6 +38,8 @@ const FighterControllerScript = preload("res://scripts/plane/fighter_controller.
 var fighter_controller
 var ultimate_active: bool = false
 var ultimate_time_left: float = 0.0
+var total_landings: int = 0
+var fighter_charges: int = 0
 
 var plane: CharacterBody2D
 var world_bounds: Rect2
@@ -221,8 +221,7 @@ func _sync_routed_aircraft_state() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Temporary test control. Landing-count unlocks will be connected later.
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
+	if event.is_action_pressed("activate_ultimate"):
 		_activate_ultimate()
 
 
@@ -238,8 +237,6 @@ func _setup_fighter_controller() -> void:
 		self,
 		fighter_plane,
 		fighter_flight_speed,
-		fighter_shoot_radius,
-		fighter_shoot_cooldown,
 		fighter_visual_rotation_offset_degrees
 	)
 
@@ -247,15 +244,16 @@ func _setup_fighter_controller() -> void:
 
 
 func _activate_ultimate() -> void:
-	if ultimate_active or fighter_controller == null:
+	if ultimate_active or fighter_controller == null or fighter_charges <= 0:
 		return
 
+	fighter_charges -= 1
 	plane.global_rotation = direction.angle() + plane_art_angle_offset
 
 	ultimate_active = true
 	ultimate_time_left = ultimate_duration
 	fighter_controller.activate()
-	print("Fighter deployed! ", ultimate_duration, " seconds.")
+	print("Fighter deployed! ", ultimate_duration, " seconds. Charges remaining: ", fighter_charges)
 
 
 func _end_ultimate() -> void:
@@ -266,35 +264,6 @@ func _end_ultimate() -> void:
 		fighter_controller.deactivate()
 
 	print("Fighter deployment ended. Normal traffic spawning resumed.")
-
-
-func try_shoot_aircraft(target_position: Vector2, shoot_radius: float) -> void:
-	if not ultimate_active:
-		return
-
-	var closest_index := -1
-	var closest_distance := shoot_radius
-
-	for i in range(aircraft.size()):
-		var state: Dictionary = aircraft[i]
-		var target_plane := state["plane"] as CharacterBody2D
-
-		if not is_instance_valid(target_plane) or target_plane == plane:
-			continue
-
-		var distance := target_plane.global_position.distance_to(target_position)
-		if distance < closest_distance:
-			closest_distance = distance
-			closest_index = i
-
-	if closest_index == -1:
-		return
-
-	var target_state: Dictionary = aircraft[closest_index]
-	var target_plane := target_state["plane"] as CharacterBody2D
-	aircraft.remove_at(closest_index)
-	target_plane.queue_free()
-	print("Arcade intercept! Remaining traffic: ", aircraft.size())
 
 
 func _register_aircraft(new_plane: CharacterBody2D, start_direction: Vector2, start_speed: float) -> void:
@@ -600,7 +569,7 @@ func _update_runway_traversal() -> bool:
 		var entered_runway := _get_runway_at_position(route_plane.global_position)
 		if entered_runway == null:
 			return false
-		var entered_point := entered_runway.to_local(plane.global_position)
+		var entered_point := entered_runway.to_local(route_plane.global_position)
 		var entered_half_size := (entered_runway.shape as RectangleShape2D).size * 0.5
 		if absf(entered_point.x) < entered_half_size.x - RUNWAY_ENTRY_MARGIN:
 			return false
@@ -666,6 +635,12 @@ func _finish_landing() -> void:
 			state["landed"] = true
 			aircraft[i] = state
 			break
+
+	total_landings += 1
+	if total_landings % 10 == 0:
+		fighter_charges += 1
+		print("Fighter ability unlocked! Total landings: ", total_landings, " | charges: ", fighter_charges)
+
 	if route_plane == plane:
 		plane_landed = true
 	route_confirmed = false
