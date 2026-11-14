@@ -11,11 +11,7 @@ The existing airport and carrier script paths remain as thin compatibility wrapp
 
 ## Boundary behavior
 
-The bounds are a `Rect2(position, size)`, not two corner coordinates. The current values describe:
-
-- Top-left: `(-808, -488)`
-- Size: `(1381, 890)`
-- Bottom-right: `(573, 402)`
+`world.gd` now gets the boundary from the used-cell rectangle of `TileMapLayer2`. It converts the outer map edges from tile-map local coordinates into global world coordinates, accounting for the TileMapLayer's tile size, position, and scale. This avoids treating tile-cell coordinates as pixel coordinates and avoids hardcoding map dimensions.
 
 Movement is advanced using the time remaining in the current physics frame. If a fast plane crosses an edge, the module places it at the edge, reverses its direction by 180 degrees, doubles its speed, and simulates the remaining frame time at the new speed. This prevents repeated boundary detection from doubling speed every frame while the plane is stuck on an edge.
 
