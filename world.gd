@@ -35,7 +35,7 @@ const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 
 const FighterControllerScript = preload("res://scripts/plane/fighter_controller.gd")
 
-var fighter_controller: Node
+var fighter_controller
 var ultimate_active: bool = false
 var ultimate_time_left: float = 0.0
 
