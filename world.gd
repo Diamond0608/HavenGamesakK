@@ -44,6 +44,9 @@ var ultimate_time_left: float = 0.0
 var plane: CharacterBody2D
 var world_bounds: Rect2
 var bounds: WorldBounds
+var direction: Vector2 = Vector2.RIGHT
+var current_speed: float = 600.0
+var movement_audio: AudioStreamPlayer2D
 
 # Each entry stores the independent movement state for one aircraft.
 var aircraft: Array[Dictionary] = []
@@ -151,7 +154,12 @@ func _ready() -> void:
 
 	plane.global_position = bounds.clamp_position(plane.global_position)
 	plane.rotation = _rotation_for_direction(first_direction)
-	_register_aircraft(plane, first_direction, minf(initial_speed, max_speed))
+	direction = first_direction
+	current_speed = minf(initial_speed, max_speed)
+	plane_art_angle_offset = deg_to_rad(plane_visual_rotation_offset_degrees)
+	movement_audio = plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
+	_register_aircraft(plane, first_direction, current_speed)
+	_setup_route_ui()
 	_setup_fighter_controller()
 
 
@@ -163,9 +171,6 @@ func _process(delta: float) -> void:
 	if ultimate_time_left <= 0.0:
 		_end_ultimate()
 
-	_setup_route_ui()
-	plane_art_angle_offset = plane.global_rotation
-
 
 func _physics_process(delta: float) -> void:
 	# Freeze traffic progression and spawning during the fighter deployment.
@@ -174,10 +179,25 @@ func _physics_process(delta: float) -> void:
 		elapsed_game_time += delta
 		spawn_clock += delta
 
-	_update_aircraft(delta)
+	if not plane_landed and route_confirmed:
+		_follow_drawn_route(delta)
+		_update_movement_audio(movement_audio, current_speed)
+		_sync_primary_aircraft_state()
+	else:
+		_update_aircraft(delta)
 
 	if not ultimate_active:
 		_try_spawn_aircraft()
+
+
+func _sync_primary_aircraft_state() -> void:
+	if aircraft.is_empty():
+		return
+
+	var primary_state: Dictionary = aircraft[0]
+	primary_state["direction"] = direction
+	primary_state["speed"] = current_speed
+	aircraft[0] = primary_state
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -203,23 +223,7 @@ func _setup_fighter_controller() -> void:
 		fighter_visual_rotation_offset_degrees
 	)
 
-	if plane_landed:
-		return
 
-	if route_confirmed:
-		_follow_drawn_route(delta)
-		_update_movement_audio()
-		return
-
-	var result: Dictionary = PlaneMovementScript.advance(
-		plane.global_position,
-		direction,
-		current_speed,
-		delta,
-		world_bounds,
-		max_speed
-	)
-	)
 
 
 func _activate_ultimate() -> void:
@@ -227,9 +231,6 @@ func _activate_ultimate() -> void:
 		return
 
 	plane.global_rotation = direction.angle() + plane_art_angle_offset
-
-	ultimate_active = true
-	ultimate_time_left = ultimate_duration
 
 	ultimate_active = true
 	ultimate_time_left = ultimate_duration
@@ -299,6 +300,9 @@ func _update_aircraft(delta: float) -> void:
 		var aircraft_node := state["plane"] as CharacterBody2D
 
 		if not is_instance_valid(aircraft_node):
+			continue
+
+		if aircraft_node == plane and (plane_landed or route_confirmed):
 			continue
 
 		var result: Dictionary = PlaneMovementScript.advance(
@@ -399,9 +403,6 @@ func _update_movement_audio(audio: AudioStreamPlayer2D, current_speed: float) ->
 	var speed_ratio: float = clampf(current_speed / max_speed, 0.0, 1.0)
 	audio.pitch_scale = lerpf(min_pitch, max_pitch, speed_ratio)
 	audio.volume_db = linear_to_db(lerpf(min_volume, 1.0, speed_ratio))
-
-	movement_audio.pitch_scale = lerpf(min_pitch, max_pitch, speed_ratio)
-	movement_audio.volume_db = linear_to_db(lerpf(min_volume, 1.0, speed_ratio))
 
 
 func _rotation_for_direction(travel_direction: Vector2) -> float:
