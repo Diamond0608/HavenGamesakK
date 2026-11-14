@@ -14,12 +14,22 @@ const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 @export var max_pitch: float = 2.0
 @export var min_volume: float = 0.1
 
+# Progressive traffic spawning. The first extra plane appears after 10 seconds.
+@export var initial_spawn_interval: float = 10.0
+@export var spawn_interval_reduction: float = 1.0
+@export var spawn_interval_reduction_every: float = 30.0
+@export var minimum_spawn_interval: float = 2.0
+@export var spawn_margin: float = 48.0
+
 var plane: CharacterBody2D
-var movement_audio: AudioStreamPlayer2D
-var current_speed: float
-var direction: Vector2
 var world_bounds: Rect2
-var bounds
+var bounds: WorldBounds
+
+# Each entry stores the independent movement state for one aircraft.
+var aircraft: Array[Dictionary] = []
+
+var elapsed_game_time: float = 0.0
+var spawn_clock: float = 0.0
 
 
 func _ready() -> void:
@@ -29,11 +39,6 @@ func _ready() -> void:
 		push_error("World: Plane not found at plane_path: " + str(plane_path))
 		set_physics_process(false)
 		return
-
-	movement_audio = plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
-
-	if movement_audio == null:
-		push_warning("World: AudioStreamPlayer2D not found inside CharacterBody2D.")
 
 	var tile_map := get_node_or_null(tile_map_path) as TileMapLayer
 
@@ -61,7 +66,7 @@ func _ready() -> void:
 	var bottom_right_local := tile_map.map_to_local(used_rect.end) - half_tile_size
 
 	# Convert the TileMapLayer's local coordinates into world coordinates,
-	# because the plane is moved using global_position.
+	# because aircraft are moved using global_position.
 	var top_left_global := tile_map.to_global(top_left_local)
 	var bottom_right_global := tile_map.to_global(bottom_right_local)
 
@@ -89,42 +94,151 @@ func _ready() -> void:
 		set_physics_process(false)
 		return
 
-	current_speed = minf(initial_speed, max_speed)
-	direction = initial_direction.normalized()
+	if initial_spawn_interval <= 0.0 or minimum_spawn_interval <= 0.0:
+		push_error("World: spawn intervals must be greater than zero.")
+		set_physics_process(false)
+		return
 
-	if direction == Vector2.ZERO:
-		direction = Vector2.RIGHT
+	if spawn_interval_reduction_every <= 0.0:
+		push_error("World: spawn_interval_reduction_every must be greater than zero.")
+		set_physics_process(false)
+		return
+
+	var first_direction := initial_direction.normalized()
+	if first_direction == Vector2.ZERO:
+		first_direction = Vector2.RIGHT
 
 	plane.global_position = bounds.clamp_position(plane.global_position)
-
-	if movement_audio and not movement_audio.playing:
-		movement_audio.play()
+	_register_aircraft(plane, first_direction, minf(initial_speed, max_speed))
 
 
 func _physics_process(delta: float) -> void:
-	var result: Dictionary = PlaneMovementScript.advance(
-		plane.global_position,
-		direction,
-		current_speed,
-		delta,
-		world_bounds,
-		max_speed
+	elapsed_game_time += delta
+	spawn_clock += delta
+
+	_update_aircraft(delta)
+	_try_spawn_aircraft()
+
+
+func _register_aircraft(new_plane: CharacterBody2D, start_direction: Vector2, start_speed: float) -> void:
+	var movement_audio := new_plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
+
+	if movement_audio == null:
+		push_warning("World: AudioStreamPlayer2D not found inside " + new_plane.name + ".")
+
+	elif not movement_audio.playing:
+		movement_audio.play()
+
+	aircraft.append({
+		"plane": new_plane,
+		"direction": start_direction.normalized(),
+		"speed": start_speed,
+		"audio": movement_audio
+	})
+
+
+func _update_aircraft(delta: float) -> void:
+	for i in range(aircraft.size()):
+		var state: Dictionary = aircraft[i]
+		var aircraft_node := state["plane"] as CharacterBody2D
+
+		if not is_instance_valid(aircraft_node):
+			continue
+
+		var result: Dictionary = PlaneMovementScript.advance(
+			aircraft_node.global_position,
+			state["direction"],
+			state["speed"],
+			delta,
+			world_bounds,
+			max_speed
+		)
+
+		aircraft_node.global_position = result["position"]
+		state["direction"] = result["direction"]
+		state["speed"] = result["speed"]
+
+		if result["bounces"] > 0:
+			aircraft_node.rotation += PI * float(result["bounces"])
+
+		_update_movement_audio(state["audio"], state["speed"])
+		aircraft[i] = state
+
+
+func _try_spawn_aircraft() -> void:
+	var interval := _get_current_spawn_interval()
+
+	if spawn_clock < interval:
+		return
+
+	spawn_clock = 0.0
+	_spawn_aircraft()
+
+
+func _get_current_spawn_interval() -> float:
+	var reduction_steps := floori(elapsed_game_time / spawn_interval_reduction_every)
+	var interval := initial_spawn_interval - float(reduction_steps) * spawn_interval_reduction
+	return maxf(minimum_spawn_interval, interval)
+
+
+func _spawn_aircraft() -> void:
+	# Duplicate the existing plane node so its sprite, collision shape and
+	# audio stream stay identical to the aircraft already in the scene.
+	var new_plane := plane.duplicate() as CharacterBody2D
+
+	if new_plane == null:
+		push_error("World: Could not duplicate the existing plane.")
+		return
+
+	new_plane.name = "Aircraft_%02d" % (aircraft.size() + 1)
+
+	# Only the original aircraft should control the shared camera.
+	var camera := new_plane.get_node_or_null("Camera2D") as Camera2D
+	if camera != null:
+		camera.enabled = false
+
+	# The world controls movement and audio for every aircraft. Remove any
+	# legacy movement script from duplicated audio nodes to avoid two movers.
+	var movement_audio := new_plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
+	if movement_audio != null:
+		movement_audio.set_script(null)
+
+	get_parent().add_child(new_plane)
+
+	var margin_x := minf(spawn_margin, world_bounds.size.x * 0.25)
+	var margin_y := minf(spawn_margin, world_bounds.size.y * 0.25)
+	var min_x := world_bounds.position.x + margin_x
+	var max_x := world_bounds.end.x - margin_x
+	var min_y := world_bounds.position.y + margin_y
+	var max_y := world_bounds.end.y - margin_y
+
+	var spawn_position := Vector2(
+		randf_range(min_x, max_x) if min_x <= max_x else world_bounds.get_center().x,
+		randf_range(min_y, max_y) if min_y <= max_y else world_bounds.get_center().y
 	)
 
-	plane.global_position = result["position"]
-	direction = result["direction"]
-	current_speed = result["speed"]
+	var angle := randf_range(0.0, TAU)
+	var direction := Vector2.RIGHT.rotated(angle)
 
-	if result["bounces"] > 0:
-		plane.rotation += PI * float(result["bounces"])
+	new_plane.global_position = spawn_position
+	new_plane.rotation = angle
 
-	_update_movement_audio()
+	_register_aircraft(new_plane, direction, minf(initial_speed, max_speed))
+
+	print(
+		"World: spawned aircraft ",
+		new_plane.name,
+		" | active aircraft: ",
+		aircraft.size(),
+		" | next interval: ",
+		_get_current_spawn_interval()
+	)
 
 
-func _update_movement_audio() -> void:
-	if movement_audio == null or max_speed <= 0.0:
+func _update_movement_audio(audio: AudioStreamPlayer2D, current_speed: float) -> void:
+	if audio == null or max_speed <= 0.0:
 		return
 
 	var speed_ratio: float = clampf(current_speed / max_speed, 0.0, 1.0)
-	movement_audio.pitch_scale = lerpf(min_pitch, max_pitch, speed_ratio)
-	movement_audio.volume_db = linear_to_db(lerpf(min_volume, 1.0, speed_ratio))
+	audio.pitch_scale = lerpf(min_pitch, max_pitch, speed_ratio)
+	audio.volume_db = linear_to_db(lerpf(min_volume, 1.0, speed_ratio))
