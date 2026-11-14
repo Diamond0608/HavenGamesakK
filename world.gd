@@ -74,9 +74,9 @@ var runway_entry_angle: float = 0.0
 var runway_line_slope: float = 0.0
 const ROUTE_POINT_SPACING: float = 18.0
 const PLANE_TAP_RADIUS: float = 48.0
-const RUNWAY_ENTRY_MARGIN: float = 24.0
-const RUNWAY_HEADING_TOLERANCE: float = 0.22
-const RUNWAY_TRACK_TOLERANCE: float = 12.0
+const RUNWAY_ENTRY_MARGIN: float = 8.0
+const RUNWAY_HEADING_TOLERANCE: float = 0.50
+const RUNWAY_TRACK_TOLERANCE: float = 30.0
 
 
 func _ready() -> void:
@@ -495,11 +495,22 @@ func _start_route_trace(world_position: Vector2) -> void:
 func _append_route_point(world_position: Vector2) -> void:
 	if route_points.is_empty():
 		return
-	if route_points[-1].distance_to(world_position) < ROUTE_POINT_SPACING:
-		return
+
 	var bounded_position: Vector2 = bounds.clamp_position(world_position)
-	route_points.append(bounded_position)
-	route_line.add_point(bounded_position)
+	var previous_position: Vector2 = route_points[-1]
+	var segment_length := previous_position.distance_to(bounded_position)
+
+	if segment_length < ROUTE_POINT_SPACING:
+		return
+
+	# Mouse-motion events are not evenly spaced. Insert intermediate points
+	# so quick cursor movement still produces a continuous route line.
+	var spacing := 6.0
+	var steps := maxi(1, ceili(segment_length / spacing))
+	for step in range(1, steps + 1):
+		var point := previous_position.lerp(bounded_position, float(step) / float(steps))
+		route_points.append(point)
+		route_line.add_point(point)
 
 
 func _reset_route() -> void:
@@ -560,6 +571,12 @@ func _follow_drawn_route(delta: float) -> void:
 			route_direction = (route_points[-1] - route_points[-2]).normalized()
 			if route_direction == Vector2.ZERO:
 				route_direction = Vector2.RIGHT
+
+		# A route may intentionally end on the runway instead of drawing all
+		# the way across it. Accept a centred, runway-aligned endpoint.
+		if _try_finish_landing_at_route_end():
+			return
+
 		route_confirmed = false
 		active_runway = null
 
@@ -572,6 +589,8 @@ func _update_runway_traversal() -> bool:
 		var entered_point := entered_runway.to_local(route_plane.global_position)
 		var entered_half_size := (entered_runway.shape as RectangleShape2D).size * 0.5
 		if absf(entered_point.x) < entered_half_size.x - RUNWAY_ENTRY_MARGIN:
+			return false
+		if absf(entered_point.y) > entered_half_size.y + RUNWAY_TRACK_TOLERANCE:
 			return false
 		runway_entry_side = signf(entered_point.x)
 		runway_travel_sign = -runway_entry_side
@@ -592,7 +611,16 @@ func _update_runway_traversal() -> bool:
 	var heading_change := absf(wrapf(current_local_direction.angle() - runway_entry_angle, -PI, PI))
 	var crossed_full_runway := (local_position.x * runway_travel_sign) >= half_size.x
 	if crossed_full_runway:
-		if absf(local_position.y - expected_y) <= RUNWAY_TRACK_TOLERANCE and absf(expected_y) <= half_size.y and heading_change <= RUNWAY_HEADING_TOLERANCE and current_local_direction.x * runway_travel_sign > 0.0:
+		var within_runway_corridor := (
+			absf(local_position.y - expected_y) <= RUNWAY_TRACK_TOLERANCE
+			and absf(expected_y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
+		)
+		var aligned_with_runway := (
+			heading_change <= RUNWAY_HEADING_TOLERANCE
+			and current_local_direction.x * runway_travel_sign > 0.0
+		)
+		if within_runway_corridor and aligned_with_runway:
+			print("Landing accepted: ", route_plane.name, " on ", active_runway.get_path())
 			_finish_landing()
 			return true
 		active_runway = null
@@ -603,10 +631,30 @@ func _update_runway_traversal() -> bool:
 		current_local_direction.x * runway_travel_sign > 0.0
 		and heading_change <= RUNWAY_HEADING_TOLERANCE
 		and absf(local_position.y - expected_y) <= RUNWAY_TRACK_TOLERANCE
-		and absf(expected_y) <= half_size.y
+		and absf(expected_y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
 	)
 	if not still_on_runway or not straight_and_centered:
 		active_runway = null
+	return false
+
+
+func _try_finish_landing_at_route_end() -> bool:
+	var runway := _get_runway_at_position(route_plane.global_position)
+	if runway == null:
+		return false
+
+	var local_position := runway.to_local(route_plane.global_position)
+	var half_size := (runway.shape as RectangleShape2D).size * 0.5
+	var local_direction := runway.global_transform.basis_xform_inv(route_direction).normalized()
+
+	var inside_runway_width := absf(local_position.y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
+	var aligned_with_runway := absf(local_direction.y) <= sin(RUNWAY_HEADING_TOLERANCE)
+
+	if inside_runway_width and aligned_with_runway:
+		print("Landing accepted at route endpoint: ", route_plane.name, " on ", runway.get_path())
+		_finish_landing()
+		return true
+
 	return false
 
 
