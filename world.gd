@@ -14,6 +14,10 @@ const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 @export var max_pitch: float = 2.0
 @export var min_volume: float = 0.1
 
+# The aircraft artwork faces up by default, so rotate it 90 degrees
+# clockwise to align its nose with a movement direction of Vector2.RIGHT.
+@export var plane_visual_rotation_offset_degrees: float = 90.0
+
 # Progressive traffic spawning. The first extra plane appears after 10 seconds.
 @export var initial_spawn_interval: float = 10.0
 @export var spawn_interval_reduction: float = 1.0
@@ -109,6 +113,7 @@ func _ready() -> void:
 		first_direction = Vector2.RIGHT
 
 	plane.global_position = bounds.clamp_position(plane.global_position)
+	plane.rotation = _rotation_for_direction(first_direction)
 	_register_aircraft(plane, first_direction, minf(initial_speed, max_speed))
 
 
@@ -158,8 +163,9 @@ func _update_aircraft(delta: float) -> void:
 		state["direction"] = result["direction"]
 		state["speed"] = result["speed"]
 
-		if result["bounces"] > 0:
-			aircraft_node.rotation += PI * float(result["bounces"])
+		# Derive the visual heading from the current travel direction. This
+		# keeps the sprite aligned after every 180-degree boundary bounce.
+		aircraft_node.rotation = _rotation_for_direction(state["direction"])
 
 		_update_movement_audio(state["audio"], state["speed"])
 		aircraft[i] = state
@@ -221,7 +227,7 @@ func _spawn_aircraft() -> void:
 	var direction := Vector2.RIGHT.rotated(angle)
 
 	new_plane.global_position = spawn_position
-	new_plane.rotation = angle
+	new_plane.rotation = _rotation_for_direction(direction)
 
 	_register_aircraft(new_plane, direction, minf(initial_speed, max_speed))
 
@@ -242,3 +248,8 @@ func _update_movement_audio(audio: AudioStreamPlayer2D, current_speed: float) ->
 	var speed_ratio: float = clampf(current_speed / max_speed, 0.0, 1.0)
 	audio.pitch_scale = lerpf(min_pitch, max_pitch, speed_ratio)
 	audio.volume_db = linear_to_db(lerpf(min_volume, 1.0, speed_ratio))
+
+
+
+func _rotation_for_direction(travel_direction: Vector2) -> float:
+	return travel_direction.angle() + deg_to_rad(plane_visual_rotation_offset_degrees)
