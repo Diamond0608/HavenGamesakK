@@ -1,31 +1,40 @@
 extends Node
 
-var world
+var world: Node
 var fighter_plane: CharacterBody2D
-
 var flight_speed: float = 850.0
-var shoot_radius: float = 65.0
-var shoot_cooldown: float = 0.25
 var visual_rotation_offset_degrees: float = 0.0
-
-var shoot_cooldown_left: float = 0.0
 
 
 func setup(
 	world_node: Node,
 	fighter_node: CharacterBody2D,
 	new_flight_speed: float,
-	new_shoot_radius: float,
-	new_shoot_cooldown: float,
 	new_rotation_offset_degrees: float
 ) -> void:
 	world = world_node
 	fighter_plane = fighter_node
 	flight_speed = new_flight_speed
-	shoot_radius = new_shoot_radius
-	shoot_cooldown = new_shoot_cooldown
 	visual_rotation_offset_degrees = new_rotation_offset_degrees
 
+	# The scene's legacy fighter script also handled movement/input.
+	# Remove it so this controller is the single owner of fighter behaviour.
+	fighter_plane.set_script(null)
+
+	var fighter_sprite := fighter_plane.get_node_or_null("Sprite2D") as Sprite2D
+	if fighter_sprite != null:
+		fighter_sprite.position = Vector2.ZERO
+
+	var fighter_collision := fighter_plane.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if fighter_collision != null:
+		fighter_collision.position = Vector2.ZERO
+		fighter_collision.rotation = 0.0
+		fighter_collision.scale = Vector2.ONE
+		if fighter_collision.shape is RectangleShape2D:
+			fighter_collision.shape = fighter_collision.shape.duplicate()
+			(fighter_collision.shape as RectangleShape2D).size = Vector2(60, 50)
+
+	fighter_plane.velocity = Vector2.ZERO
 	fighter_plane.hide()
 	fighter_plane.set_physics_process(false)
 
@@ -38,7 +47,6 @@ func activate() -> void:
 	fighter_plane.velocity = Vector2.ZERO
 	fighter_plane.show()
 	fighter_plane.set_physics_process(true)
-	shoot_cooldown_left = 0.0
 
 
 func deactivate() -> void:
@@ -50,11 +58,9 @@ func deactivate() -> void:
 	fighter_plane.set_physics_process(false)
 
 
-func _physics_process(delta: float) -> void:
-	if not world.ultimate_active or not is_instance_valid(fighter_plane):
+func _physics_process(_delta: float) -> void:
+	if not is_instance_valid(fighter_plane) or not world.ultimate_active:
 		return
-
-	shoot_cooldown_left = maxf(0.0, shoot_cooldown_left - delta)
 
 	var input_direction := Vector2.ZERO
 	if Input.is_key_pressed(KEY_W):
@@ -74,15 +80,3 @@ func _physics_process(delta: float) -> void:
 
 	fighter_plane.move_and_slide()
 	fighter_plane.global_position = world.bounds.clamp_position(fighter_plane.global_position)
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if not world.ultimate_active or not is_instance_valid(fighter_plane):
-		return
-
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if shoot_cooldown_left > 0.0:
-			return
-
-		shoot_cooldown_left = shoot_cooldown
-		world.try_shoot_aircraft(fighter_plane.get_global_mouse_position(), shoot_radius)
