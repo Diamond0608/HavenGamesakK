@@ -10,7 +10,12 @@ const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 @export var plane_path: NodePath = ^"CharacterBody2D"
 @export var tile_map_path: NodePath = ^"TileMapLayer2"
 
+@export var min_pitch: float = 0.8
+@export var max_pitch: float = 2.0
+@export var min_volume: float = 0.1
+
 var plane: CharacterBody2D
+var movement_audio: AudioStreamPlayer2D
 var current_speed: float
 var direction: Vector2
 var world_bounds: Rect2
@@ -24,6 +29,11 @@ func _ready() -> void:
 		push_error("World: Plane not found at plane_path: " + str(plane_path))
 		set_physics_process(false)
 		return
+
+	movement_audio = plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
+
+	if movement_audio == null:
+		push_warning("World: AudioStreamPlayer2D not found inside CharacterBody2D.")
 
 	var tile_map := get_node_or_null(tile_map_path) as TileMapLayer
 
@@ -87,6 +97,9 @@ func _ready() -> void:
 
 	plane.global_position = bounds.clamp_position(plane.global_position)
 
+	if movement_audio and not movement_audio.playing:
+		movement_audio.play()
+
 
 func _physics_process(delta: float) -> void:
 	var result: Dictionary = PlaneMovementScript.advance(
@@ -104,3 +117,14 @@ func _physics_process(delta: float) -> void:
 
 	if result["bounces"] > 0:
 		plane.rotation += PI * float(result["bounces"])
+
+	_update_movement_audio()
+
+
+func _update_movement_audio() -> void:
+	if movement_audio == null or max_speed <= 0.0:
+		return
+
+	var speed_ratio: float = clampf(current_speed / max_speed, 0.0, 1.0)
+	movement_audio.pitch_scale = lerpf(min_pitch, max_pitch, speed_ratio)
+	movement_audio.volume_db = linear_to_db(lerpf(min_volume, 1.0, speed_ratio))

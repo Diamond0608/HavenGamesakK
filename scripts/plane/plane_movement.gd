@@ -1,5 +1,4 @@
 extends RefCounted
-extends CharacterBody2D
 
 const MAX_BOUNCES_PER_FRAME: int = 64
 
