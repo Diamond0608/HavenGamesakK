@@ -57,6 +57,9 @@ var spawn_clock: float = 0.0
 var route_line: Line2D
 var route_confirmed: bool = false
 var plane_art_angle_offset: float = 0.0
+var route_plane: CharacterBody2D
+var route_speed: float = 0.0
+var route_direction: Vector2 = Vector2.RIGHT
 var route_points: Array[Vector2] = []
 var route_index: int = 0
 var is_drawing_route: bool = false
@@ -153,6 +156,7 @@ func _ready() -> void:
 		first_direction = Vector2.RIGHT
 
 	plane.global_position = bounds.clamp_position(plane.global_position)
+	route_plane = plane
 	plane.rotation = _rotation_for_direction(first_direction)
 	direction = first_direction
 	current_speed = minf(initial_speed, max_speed)
@@ -183,10 +187,11 @@ func _physics_process(delta: float) -> void:
 	# updater while it is following a route or has already landed.
 	_update_aircraft(delta)
 
-	if not plane_landed and route_confirmed:
+	if route_confirmed and is_instance_valid(route_plane):
 		_follow_drawn_route(delta)
-		_update_movement_audio(movement_audio, current_speed)
-		_sync_primary_aircraft_state()
+		var route_audio := route_plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
+		_update_movement_audio(route_audio, route_speed)
+		_sync_routed_aircraft_state()
 
 	if not ultimate_active:
 		_try_spawn_aircraft()
@@ -200,6 +205,19 @@ func _sync_primary_aircraft_state() -> void:
 	primary_state["direction"] = direction
 	primary_state["speed"] = current_speed
 	aircraft[0] = primary_state
+
+
+func _sync_routed_aircraft_state() -> void:
+	for i in range(aircraft.size()):
+		var state: Dictionary = aircraft[i]
+		if state["plane"] == route_plane:
+			state["direction"] = route_direction
+			state["speed"] = route_speed
+			aircraft[i] = state
+			if route_plane == plane:
+				direction = route_direction
+				current_speed = route_speed
+			return
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -304,7 +322,7 @@ func _update_aircraft(delta: float) -> void:
 		if not is_instance_valid(aircraft_node):
 			continue
 
-		if aircraft_node == plane and (plane_landed or route_confirmed):
+		if bool(state.get("landed", false)) or (aircraft_node == route_plane and route_confirmed):
 			continue
 
 		var result: Dictionary = PlaneMovementScript.advance(
@@ -370,7 +388,7 @@ func _spawn_aircraft() -> void:
 	if movement_audio != null:
 		movement_audio.set_script(null)
 
-	get_parent().add_child(new_plane)
+	add_child(new_plane)
 
 	var margin_x := minf(spawn_margin, world_bounds.size.x * 0.25)
 	var margin_y := minf(spawn_margin, world_bounds.size.y * 0.25)
@@ -426,14 +444,18 @@ func _setup_route_ui() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if plane_landed:
+	if not is_instance_valid(route_plane) or _is_aircraft_landed(route_plane):
+		route_plane = _first_active_aircraft()
+	if route_plane == null:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var world_mouse := _viewport_to_world(event.position)
 		if event.pressed:
-			if _is_tapping_plane(event.position):
+			var clicked_plane := _plane_at_viewport_position(event.position)
+			if clicked_plane != null:
+				route_plane = clicked_plane
 				_reset_route()
-				_start_route_trace(plane.global_position)
+				_start_route_trace(route_plane.global_position)
 				return
 			_start_route_trace(world_mouse)
 		elif is_drawing_route:
@@ -454,17 +476,44 @@ func _viewport_to_world(viewport_position: Vector2) -> Vector2:
 	return get_viewport().get_canvas_transform().affine_inverse() * viewport_position
 
 
-func _is_tapping_plane(viewport_position: Vector2) -> bool:
-	var plane_viewport_position := get_viewport().get_canvas_transform() * plane.global_position
-	return plane_viewport_position.distance_to(viewport_position) <= PLANE_TAP_RADIUS
+func _plane_at_viewport_position(viewport_position: Vector2) -> CharacterBody2D:
+	var closest_plane: CharacterBody2D
+	var closest_distance := PLANE_TAP_RADIUS
+	for state in aircraft:
+		var candidate := state["plane"] as CharacterBody2D
+		if not is_instance_valid(candidate) or not candidate.visible or bool(state.get("landed", false)):
+			continue
+		var screen_position := get_viewport().get_canvas_transform() * candidate.global_position
+		var distance := screen_position.distance_to(viewport_position)
+		if distance <= closest_distance:
+			closest_plane = candidate
+			closest_distance = distance
+	return closest_plane
+
+
+func _is_aircraft_landed(aircraft_node: CharacterBody2D) -> bool:
+	for state in aircraft:
+		if state["plane"] == aircraft_node:
+			return bool(state.get("landed", false))
+	return false
+
+
+func _first_active_aircraft() -> CharacterBody2D:
+	for state in aircraft:
+		var candidate := state["plane"] as CharacterBody2D
+		if is_instance_valid(candidate) and candidate.visible and not bool(state.get("landed", false)):
+			return candidate
+	return null
 
 
 func _start_route_trace(world_position: Vector2) -> void:
+	if not is_instance_valid(route_plane):
+		route_plane = plane
 	route_confirmed = false
 	route_points.clear()
-	route_points.append(plane.global_position)
+	route_points.append(route_plane.global_position)
 	active_runway = null
-	if world_position.distance_to(plane.global_position) >= ROUTE_POINT_SPACING:
+	if world_position.distance_to(route_plane.global_position) >= ROUTE_POINT_SPACING:
 		route_points.append(world_position)
 	route_line.clear_points()
 	for point in route_points:
@@ -497,46 +546,58 @@ func _reset_route() -> void:
 func _route_confirmed() -> void:
 	if route_points.size() < 2:
 		return
+	var selected_state := _get_aircraft_state(route_plane)
+	if selected_state.is_empty():
+		return
 	route_confirmed = true
 	route_index = 1
+	route_speed = float(selected_state["speed"])
+	route_direction = selected_state["direction"]
 	active_runway = null
 	route_line.hide()
 
 
+func _get_aircraft_state(aircraft_node: CharacterBody2D) -> Dictionary:
+	for state in aircraft:
+		if state["plane"] == aircraft_node:
+			return state
+	return {}
+
+
 func _follow_drawn_route(delta: float) -> void:
-	var distance_left := current_speed * delta
+	var distance_left := route_speed * delta
 	while route_index < route_points.size() and distance_left > 0.0:
 		var target := route_points[route_index]
-		var offset := target - plane.global_position
+		var offset := target - route_plane.global_position
 		var distance := offset.length()
 		if distance <= distance_left:
 			if distance > 0.0:
-				direction = offset / distance
-				plane.global_rotation = direction.angle() + plane_art_angle_offset
-			plane.global_position = target
+				route_direction = offset / distance
+				route_plane.global_rotation = _rotation_for_direction(route_direction)
+			route_plane.global_position = target
 			distance_left -= distance
 			route_index += 1
 			if _update_runway_traversal():
 				return
 			continue
-		direction = offset / distance
-		plane.global_position += direction * distance_left
-		plane.global_rotation = direction.angle() + plane_art_angle_offset
+		route_direction = offset / distance
+		route_plane.global_position += route_direction * distance_left
+		route_plane.global_rotation = _rotation_for_direction(route_direction)
 		if _update_runway_traversal():
 			return
 		distance_left = 0.0
 	if route_index >= route_points.size():
 		if route_points.size() >= 2:
-			direction = (route_points[-1] - route_points[-2]).normalized()
-			if direction == Vector2.ZERO:
-				direction = Vector2.RIGHT
+			route_direction = (route_points[-1] - route_points[-2]).normalized()
+			if route_direction == Vector2.ZERO:
+				route_direction = Vector2.RIGHT
 		route_confirmed = false
 		active_runway = null
 
 
 func _update_runway_traversal() -> bool:
 	if active_runway == null:
-		var entered_runway := _get_runway_at_position(plane.global_position)
+		var entered_runway := _get_runway_at_position(route_plane.global_position)
 		if entered_runway == null:
 			return false
 		var entered_point := entered_runway.to_local(plane.global_position)
@@ -545,7 +606,7 @@ func _update_runway_traversal() -> bool:
 			return false
 		runway_entry_side = signf(entered_point.x)
 		runway_travel_sign = -runway_entry_side
-		var entry_local_direction := entered_runway.global_transform.basis_xform_inv(direction).normalized()
+		var entry_local_direction := entered_runway.global_transform.basis_xform_inv(route_direction).normalized()
 		if entry_local_direction.x * runway_travel_sign <= 0.0 or absf(entry_local_direction.y) > 0.2:
 			return false
 		active_runway = entered_runway
@@ -555,9 +616,9 @@ func _update_runway_traversal() -> bool:
 		runway_line_slope = entry_local_direction.y / entry_local_direction.x
 		return false
 
-	var local_position := active_runway.to_local(plane.global_position)
+	var local_position := active_runway.to_local(route_plane.global_position)
 	var half_size := (active_runway.shape as RectangleShape2D).size * 0.5
-	var current_local_direction := active_runway.global_transform.basis_xform_inv(direction).normalized()
+	var current_local_direction := active_runway.global_transform.basis_xform_inv(route_direction).normalized()
 	var expected_y := runway_entry_y + (local_position.x - runway_entry_x) * runway_line_slope
 	var heading_change := absf(wrapf(current_local_direction.angle() - runway_entry_angle, -PI, PI))
 	var crossed_full_runway := (local_position.x * runway_travel_sign) >= half_size.x
@@ -568,7 +629,7 @@ func _update_runway_traversal() -> bool:
 		active_runway = null
 		return false
 
-	var still_on_runway := _get_runway_at_position(plane.global_position) == active_runway
+	var still_on_runway := _get_runway_at_position(route_plane.global_position) == active_runway
 	var straight_and_centered := (
 		current_local_direction.x * runway_travel_sign > 0.0
 		and heading_change <= RUNWAY_HEADING_TOLERANCE
@@ -581,12 +642,14 @@ func _update_runway_traversal() -> bool:
 
 
 func _get_runway_at_position(world_position: Vector2) -> CollisionShape2D:
-	for runway in find_children("*", "Area2D", true, false):
-		if not runway.name.to_lower().contains("airport"):
+	var runway_paths: Array[NodePath] = [
+		^"AirportnewRemovebgPreview/CollisionShape2D",
+		^"AirportnewRemovebgPreview2/CollisionShape2D"
+	]
+	for runway_path in runway_paths:
+		var runway_shape := get_node_or_null(runway_path) as CollisionShape2D
+		if runway_shape == null:
 			continue
-		if not runway.has_node("CollisionShape2D"):
-			continue
-		var runway_shape := runway.get_node("CollisionShape2D") as CollisionShape2D
 		if runway_shape.disabled or not runway_shape.shape is RectangleShape2D:
 			continue
 		var shape_point := runway_shape.to_local(world_position)
@@ -597,10 +660,18 @@ func _get_runway_at_position(world_position: Vector2) -> CollisionShape2D:
 
 
 func _finish_landing() -> void:
-	plane_landed = true
+	for i in range(aircraft.size()):
+		var state: Dictionary = aircraft[i]
+		if state["plane"] == route_plane:
+			state["landed"] = true
+			aircraft[i] = state
+			break
+	if route_plane == plane:
+		plane_landed = true
 	route_confirmed = false
 	is_drawing_route = false
 	route_line.hide()
-	plane.hide()
-	if movement_audio:
-		movement_audio.stop()
+	route_plane.hide()
+	var route_audio := route_plane.get_node_or_null("AudioStreamPlayer2D") as AudioStreamPlayer2D
+	if route_audio:
+		route_audio.stop()
