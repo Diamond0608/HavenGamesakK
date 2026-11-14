@@ -68,18 +68,29 @@ var route_index: int = 0
 var is_drawing_route: bool = false
 var route_trace_moved: bool = false
 var plane_landed: bool = false
-var active_runway: CollisionShape2D
-var runway_entry_side: float = 0.0
-var runway_entry_x: float = 0.0
-var runway_entry_y: float = 0.0
-var runway_travel_sign: float = 0.0
-var runway_entry_angle: float = 0.0
-var runway_line_slope: float = 0.0
 const ROUTE_POINT_SPACING: float = 18.0
 const PLANE_TAP_RADIUS: float = 48.0
-const RUNWAY_ENTRY_MARGIN: float = 8.0
-const RUNWAY_HEADING_TOLERANCE: float = 0.50
-const RUNWAY_TRACK_TOLERANCE: float = 30.0
+
+# --- Runway landing gates ---------------------------------------------------
+# Every runway has two "gate" boxes, one at each end. A plane lands when the
+# same plane touches both gates of one runway within a short time. The allowed
+# time depends on the plane's speed (gate distance / speed).
+const RUNWAY_PATHS: Array[String] = [
+	"AirportnewRemovebgPreview",
+	"AirportnewRemovebgPreview2",
+	"AircraftCarrierNewRemovebgPreview"
+]
+const GATE_DEPTH: float = 40.0              # thickness of auto-made gates, runway-local units
+const GATE_TIME_MIN_FACTOR: float = 0.5     # faster than half the expected time = rejected
+const GATE_TIME_MAX_FACTOR: float = 1.5     # slower than 1.5x the expected time = rejected
+const GATE_TIME_SLACK: float = 0.1          # extra seconds of forgiveness
+const LANDING_GRACE: float = 0.5            # seconds after the route ends that a landing can still count
+
+var scoreboard_label: Label
+var physics_clock: float = 0.0
+var landing_window_until: float = 0.0
+var runway_gates: Dictionary = {}           # runway Area2D -> Array of gate nodes
+var gate_hits: Dictionary = {}              # runway Area2D -> {"gate": Node2D, "time": float}
 
 
 func _ready() -> void:
@@ -176,9 +187,13 @@ func _ready() -> void:
 	_setup_route_ui()
 	_setup_fighter_controller()
 	_setup_aircraft_collision_manager()
+	_setup_runway_gates()
+	_setup_scoreboard()
 
 
 func _process(delta: float) -> void:
+	_update_scoreboard()
+
 	if not ultimate_active:
 		return
 
@@ -188,6 +203,8 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	physics_clock += delta
+
 	# Freeze traffic progression and spawning during the fighter deployment.
 	# Existing aircraft continue flying normally.
 	if not ultimate_active:
@@ -271,7 +288,7 @@ func _on_aircraft_collision(
 ) -> void:
 	if route_plane == first_plane or route_plane == second_plane:
 		route_confirmed = false
-		active_runway = null
+		gate_hits.clear()
 		if route_line:
 			route_line.hide()
 	if plane == first_plane or plane == second_plane:
@@ -386,6 +403,9 @@ func _spawn_aircraft() -> void:
 
 	new_plane.name = "Aircraft_%02d" % (aircraft.size() + 1)
 	new_plane.show()
+
+	# duplicate() copies the template's visibility. Once the original plane
+	# has landed it is hidden, so without this every new plane spawns invisible.
 
 	# Only the original aircraft should control the shared camera.
 	var camera := new_plane.get_node_or_null("Camera2D") as Camera2D
@@ -522,7 +542,6 @@ func _start_route_trace(world_position: Vector2) -> void:
 	route_confirmed = false
 	route_points.clear()
 	route_points.append(route_plane.global_position)
-	active_runway = null
 	if world_position.distance_to(route_plane.global_position) >= ROUTE_POINT_SPACING:
 		route_points.append(world_position)
 	route_line.clear_points()
@@ -572,9 +591,10 @@ func _route_confirmed() -> void:
 		return
 	route_confirmed = true
 	route_index = 1
+	gate_hits.clear()
+	landing_window_until = INF
 	route_speed = float(selected_state["speed"])
 	route_direction = selected_state["direction"]
-	active_runway = null
 	route_line.hide()
 
 
@@ -598,123 +618,154 @@ func _follow_drawn_route(delta: float) -> void:
 			route_plane.global_position = target
 			distance_left -= distance
 			route_index += 1
-			if _update_runway_traversal():
-				return
 			continue
 		route_direction = offset / distance
 		route_plane.global_position += route_direction * distance_left
 		route_plane.global_rotation = _rotation_for_direction(route_direction)
-		if _update_runway_traversal():
-			return
 		distance_left = 0.0
 	if route_index >= route_points.size():
 		if route_points.size() >= 2:
 			route_direction = (route_points[-1] - route_points[-2]).normalized()
 			if route_direction == Vector2.ZERO:
 				route_direction = Vector2.RIGHT
-
-		# A route may intentionally end on the runway instead of drawing all
-		# the way across it. Accept a centred, runway-aligned endpoint.
-		if _try_finish_landing_at_route_end():
-			return
-
 		route_confirmed = false
-		active_runway = null
+		# Area signals arrive after this function, so give the plane a moment
+		# to still get credit if the route ends right on the second gate.
+		landing_window_until = physics_clock + LANDING_GRACE
 
 
-func _update_runway_traversal() -> bool:
-	if active_runway == null:
-		var entered_runway := _get_runway_at_position(route_plane.global_position)
-		if entered_runway == null:
-			return false
-		var entered_point := entered_runway.to_local(route_plane.global_position)
-		var entered_half_size := (entered_runway.shape as RectangleShape2D).size * 0.5
-		if absf(entered_point.x) < entered_half_size.x - RUNWAY_ENTRY_MARGIN:
-			return false
-		if absf(entered_point.y) > entered_half_size.y + RUNWAY_TRACK_TOLERANCE:
-			return false
-		runway_entry_side = signf(entered_point.x)
-		runway_travel_sign = -runway_entry_side
-		var entry_local_direction := entered_runway.global_transform.basis_xform_inv(route_direction).normalized()
-		if entry_local_direction.x * runway_travel_sign <= 0.0 or absf(entry_local_direction.y) > 0.25:
-			return false
-		active_runway = entered_runway
-		runway_entry_x = entered_point.x
-		runway_entry_y = entered_point.y
-		runway_entry_angle = entry_local_direction.angle()
-		runway_line_slope = entry_local_direction.y / entry_local_direction.x
-		return false
+# Finds the two gate boxes of every runway. If you already made them in the
+# editor (child Area2D nodes, or extra CollisionShape2D nodes next to the
+# runway's main "CollisionShape2D"), those are used. Otherwise two are created.
+func _setup_runway_gates() -> void:
+	for runway_name in RUNWAY_PATHS:
+		var runway := get_node_or_null(runway_name) as Area2D
+		var main_shape := get_node_or_null(runway_name + "/CollisionShape2D") as CollisionShape2D
+		if runway == null or main_shape == null or not main_shape.shape is RectangleShape2D:
+			push_warning("World: could not set up gates for " + runway_name)
+			continue
 
-	var local_position := active_runway.to_local(route_plane.global_position)
-	var half_size := (active_runway.shape as RectangleShape2D).size * 0.5
-	var current_local_direction := active_runway.global_transform.basis_xform_inv(route_direction).normalized()
-	var expected_y := runway_entry_y + (local_position.x - runway_entry_x) * runway_line_slope
-	var heading_change := absf(wrapf(current_local_direction.angle() - runway_entry_angle, -PI, PI))
-	var crossed_full_runway := (local_position.x * runway_travel_sign) >= half_size.x
-	if crossed_full_runway:
-		var within_runway_corridor := (
-			absf(local_position.y - expected_y) <= RUNWAY_TRACK_TOLERANCE
-			and absf(expected_y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
+		var gates: Array[Node2D] = []
+		var uses_shape_signal := false
+		for child in runway.get_children():
+			if child is Area2D:
+				gates.append(child as Area2D)
+			elif child is CollisionShape2D and child != main_shape:
+				gates.append(child as CollisionShape2D)
+				uses_shape_signal = true
+
+		if gates.size() == 2:
+			print("World: ", runway_name, " is using your 2 existing gate boxes: ", gates[0].name, ", ", gates[1].name)
+		else:
+			for gate in gates:
+				push_warning("World: ignoring " + str(gate.name) + " on " + runway_name + " (need exactly 2 gate boxes).")
+			gates = _create_runway_gates(runway, main_shape)
+			uses_shape_signal = false
+			print("World: ", runway_name, " had no usable gate boxes, created 2 automatically.")
+
+		runway_gates[runway] = gates
+		for gate in gates:
+			if gate is Area2D:
+				(gate as Area2D).body_entered.connect(_on_gate_body_entered.bind(runway, gate))
+		if uses_shape_signal:
+			runway.body_shape_entered.connect(_on_runway_shape_entered.bind(runway))
+
+
+func _create_runway_gates(runway: Area2D, main_shape: CollisionShape2D) -> Array[Node2D]:
+	var made: Array[Node2D] = []
+	var runway_size := (main_shape.shape as RectangleShape2D).size
+	# The runway's long side is its length. Airports are long on x, the
+	# aircraft carrier is long on y.
+	var along_y := runway_size.y > runway_size.x
+	var length := runway_size.y if along_y else runway_size.x
+	var width := runway_size.x if along_y else runway_size.y
+	for side in [-1.0, 1.0]:
+		var along_offset: float = side * (length - GATE_DEPTH) * 0.5
+		var gate := Area2D.new()
+		gate.name = "Gate_A" if side < 0.0 else "Gate_B"
+		gate.input_pickable = false
+		gate.position = main_shape.position + (Vector2(0.0, along_offset) if along_y else Vector2(along_offset, 0.0))
+		var rect := RectangleShape2D.new()
+		rect.size = Vector2(width, GATE_DEPTH) if along_y else Vector2(GATE_DEPTH, width)
+		var gate_shape := CollisionShape2D.new()
+		gate_shape.shape = rect
+		gate.add_child(gate_shape)
+		runway.add_child(gate)
+		made.append(gate)
+	return made
+
+
+# Used when the gates are CollisionShape2D nodes sitting inside the runway Area2D.
+func _on_runway_shape_entered(_body_rid: RID, body: Node2D, _body_shape_index: int, local_shape_index: int, runway: Area2D) -> void:
+	var owner_id := runway.shape_find_owner(local_shape_index)
+	var shape_node := runway.shape_owner_get_owner(owner_id) as Node2D
+	if shape_node == null or not runway_gates.get(runway, []).has(shape_node):
+		return
+	_on_gate_body_entered(body, runway, shape_node)
+
+
+func _on_gate_body_entered(body: Node2D, runway: Area2D, gate: Node2D) -> void:
+	if body != route_plane or physics_clock > landing_window_until:
+		return
+	var previous: Dictionary = gate_hits.get(runway, {})
+	if not previous.is_empty() and previous["gate"] != gate:
+		var elapsed := physics_clock - float(previous["time"])
+		var gate_distance := (previous["gate"] as Node2D).global_position.distance_to(gate.global_position)
+		var expected := gate_distance / maxf(route_speed, 1.0)
+		var in_window := (
+			elapsed >= expected * GATE_TIME_MIN_FACTOR
+			and elapsed <= expected * GATE_TIME_MAX_FACTOR + GATE_TIME_SLACK
 		)
-		var aligned_with_runway := (
-			heading_change <= RUNWAY_HEADING_TOLERANCE
-			and current_local_direction.x * runway_travel_sign > 0.0
-		)
-		if within_runway_corridor and aligned_with_runway:
-			print("Landing accepted: ", route_plane.name, " on ", active_runway.get_path())
+		print("Gate hit 2/2 on ", runway.name, " | elapsed: ", snappedf(elapsed, 0.001), "s | expected: ", snappedf(expected, 0.001), "s | accepted: ", in_window)
+		if in_window:
+			print("Landing accepted: ", route_plane.name, " on ", runway.name)
+			gate_hits.clear()
 			_finish_landing()
-			return true
-		active_runway = null
-		return false
-
-	var still_on_runway := _get_runway_at_position(route_plane.global_position) == active_runway
-	var straight_and_centered := (
-		current_local_direction.x * runway_travel_sign > 0.0
-		and heading_change <= RUNWAY_HEADING_TOLERANCE
-		and absf(local_position.y - expected_y) <= RUNWAY_TRACK_TOLERANCE
-		and absf(expected_y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
-	)
-	if not still_on_runway or not straight_and_centered:
-		active_runway = null
-	return false
+			return
+	gate_hits[runway] = {"gate": gate, "time": physics_clock}
 
 
-func _try_finish_landing_at_route_end() -> bool:
-	var runway := _get_runway_at_position(route_plane.global_position)
-	if runway == null:
-		return false
+func _setup_scoreboard() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "Scoreboard"
+	layer.layer = 50
+	add_child(layer)
 
-	var local_position := runway.to_local(route_plane.global_position)
-	var half_size := (runway.shape as RectangleShape2D).size * 0.5
-	var local_direction := runway.global_transform.basis_xform_inv(route_direction).normalized()
+	var panel := PanelContainer.new()
+	panel.position = Vector2(24.0, 24.0)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.0, 0.0, 0.0, 0.55)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(14.0)
+	panel.add_theme_stylebox_override("panel", style)
 
-	var inside_runway_width := absf(local_position.y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
-	var aligned_with_runway := absf(local_direction.y) <= sin(RUNWAY_HEADING_TOLERANCE)
-
-	if inside_runway_width and aligned_with_runway:
-		print("Landing accepted at route endpoint: ", route_plane.name, " on ", runway.get_path())
-		_finish_landing()
-		return true
-
-	return false
+	scoreboard_label = Label.new()
+	scoreboard_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scoreboard_label.add_theme_font_size_override("font_size", 28)
+	panel.add_child(scoreboard_label)
+	layer.add_child(panel)
+	_update_scoreboard()
 
 
-func _get_runway_at_position(world_position: Vector2) -> CollisionShape2D:
-	var runway_paths: Array[NodePath] = [
-		^"AirportnewRemovebgPreview/CollisionShape2D",
-		^"AirportnewRemovebgPreview2/CollisionShape2D"
+func _update_scoreboard() -> void:
+	if scoreboard_label == null:
+		return
+
+	var planes_in_air := 0
+	for state in aircraft:
+		if is_instance_valid(state["plane"]) and not bool(state.get("landed", false)):
+			planes_in_air += 1
+
+	var seconds := int(elapsed_game_time)
+	var text := "Landings: %d\nTime: %d:%02d\nPlanes in the air: %d\nFighter charges: %d" % [
+		total_landings, seconds / 60, seconds % 60, planes_in_air, fighter_charges
 	]
-	for runway_path in runway_paths:
-		var runway_shape := get_node_or_null(runway_path) as CollisionShape2D
-		if runway_shape == null:
-			continue
-		if runway_shape.disabled or not runway_shape.shape is RectangleShape2D:
-			continue
-		var shape_point := runway_shape.to_local(world_position)
-		var half_size := (runway_shape.shape as RectangleShape2D).size * 0.5
-		if absf(shape_point.x) <= half_size.x and absf(shape_point.y) <= half_size.y:
-			return runway_shape
-	return null
+	if ultimate_active:
+		text += "\nFIGHTER ACTIVE: %ds" % int(ceilf(ultimate_time_left))
+	else:
+		text += "\nNext fighter charge in: %d" % (10 - total_landings % 10)
+	scoreboard_label.text = text
 
 
 func _finish_landing() -> void:
