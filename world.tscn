@@ -1240,6 +1240,9 @@ animations = [{
 "speed": 6.0
 }]
 
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_rtept"]
+size = Vector2(71.63482, 64.89389)
+
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_sbf0h"]
 size = Vector2(13910.18, 109.37645)
 
@@ -1336,6 +1339,10 @@ scale = Vector2(13, 13)
 scale = Vector2(1.013, 1.013)
 sprite_frames = SubResource("SpriteFrames_n6my8")
 frame_progress = 0.69610304
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CharacterBody2D2" unique_id=2088511797]
+position = Vector2(0.92333984, -0.19085693)
+shape = SubResource("RectangleShape2D_rtept")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=384358701]
 position = Vector2(-773, -1015)
