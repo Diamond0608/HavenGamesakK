@@ -85,10 +85,19 @@ const GATE_TIME_MIN_FACTOR: float = 0.5     # faster than half the expected time
 const GATE_TIME_MAX_FACTOR: float = 1.5     # slower than 1.5x the expected time = rejected
 const GATE_TIME_SLACK: float = 0.1          # extra seconds of forgiveness
 const LANDING_GRACE: float = 0.5            # seconds after the route ends that a landing can still count
+const RUNWAY_END_ALIGNMENT: float = 0.8     # route must end within about 35 degrees of the runway direction
+
+# --- Fighter shooting -------------------------------------------------------
+const SHOT_RADIUS_PX: float = 80.0          # how close to a plane (in screen pixels) a click must be
+const SHOT_COOLDOWN: float = 0.25           # seconds between shots
+const EXPLOSION_SOUND_PATH: String = "res://dragon-studio-boom-crash-487664.mp3"
 
 var scoreboard_label: Label
+var planes_destroyed: int = 0
+var last_shot_time: float = -100.0
 var physics_clock: float = 0.0
 var landing_window_until: float = 0.0
+var runway_main_shapes: Dictionary = {}    # runway Area2D -> its main CollisionShape2D
 var runway_gates: Dictionary = {}           # runway Area2D -> Array of gate nodes
 var gate_hits: Dictionary = {}              # runway Area2D -> {"gate": Node2D, "time": float}
 
@@ -272,6 +281,8 @@ func _setup_fighter_controller() -> void:
 	)
 
 
+
+
 func _setup_aircraft_collision_manager() -> void:
 	var explosion_template := get_node_or_null("ExplosionTemplate") as AnimatedSprite2D
 	if explosion_template != null:
@@ -296,10 +307,14 @@ func _on_aircraft_collision(
 	print("Aircraft collision at ", impact_position, ". Both aircraft destroyed.")
 
 
-
-
 func _activate_ultimate() -> void:
 	if ultimate_active or fighter_controller == null or fighter_charges <= 0:
+		return
+	# The original plane can be destroyed in a collision or by a shot, so
+	# fall back to any plane that is still flying.
+	if not is_instance_valid(plane):
+		plane = _first_active_aircraft()
+	if plane == null:
 		return
 
 	fighter_charges -= 1
@@ -307,6 +322,9 @@ func _activate_ultimate() -> void:
 
 	ultimate_active = true
 	ultimate_time_left = ultimate_duration
+	if is_drawing_route:
+		is_drawing_route = false
+		route_line.hide()
 	fighter_controller.activate()
 	print("Fighter deployed! ", ultimate_duration, " seconds. Charges remaining: ", fighter_charges)
 
@@ -402,10 +420,9 @@ func _spawn_aircraft() -> void:
 		return
 
 	new_plane.name = "Aircraft_%02d" % (aircraft.size() + 1)
-	new_plane.show()
 
-	# duplicate() copies the template's visibility. Once the original plane
-	# has landed it is hidden, so without this every new plane spawns invisible.
+	# The template is hidden, and duplicate() copies that, so show each new plane.
+	new_plane.show()
 
 	# Only the original aircraft should control the shared camera.
 	var camera := new_plane.get_node_or_null("Camera2D") as Camera2D
@@ -474,6 +491,13 @@ func _setup_route_ui() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# While the fighter is deployed, left click shoots instead of drawing routes.
+	if ultimate_active:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			_fire_fighter_shot(event.position)
+		if event is InputEventMouseButton or event is InputEventMouseMotion:
+			get_viewport().set_input_as_handled()
+			return
 	if not is_instance_valid(route_plane) or _is_aircraft_landed(route_plane):
 		route_plane = _first_active_aircraft()
 	if route_plane == null:
@@ -506,9 +530,9 @@ func _viewport_to_world(viewport_position: Vector2) -> Vector2:
 	return get_viewport().get_canvas_transform().affine_inverse() * viewport_position
 
 
-func _plane_at_viewport_position(viewport_position: Vector2) -> CharacterBody2D:
+func _plane_at_viewport_position(viewport_position: Vector2, max_distance: float = PLANE_TAP_RADIUS) -> CharacterBody2D:
 	var closest_plane: CharacterBody2D
-	var closest_distance := PLANE_TAP_RADIUS
+	var closest_distance := max_distance
 	for state in aircraft:
 		var candidate := state["plane"] as CharacterBody2D
 		if not is_instance_valid(candidate) or not candidate.visible or bool(state.get("landed", false)):
@@ -632,6 +656,37 @@ func _follow_drawn_route(delta: float) -> void:
 		# Area signals arrive after this function, so give the plane a moment
 		# to still get credit if the route ends right on the second gate.
 		landing_window_until = physics_clock + LANDING_GRACE
+		# A route may also end on the runway itself instead of crossing all of it.
+		_try_land_at_route_end()
+
+
+# The plane came in through one end gate, the route stopped while the plane is
+# on the runway, and it is pointing along the runway: that counts as a landing.
+func _try_land_at_route_end() -> void:
+	for key in runway_gates.keys():
+		var runway := key as Area2D
+		var hit: Dictionary = gate_hits.get(runway, {})
+		var main_shape := runway_main_shapes.get(runway) as CollisionShape2D
+		var gates: Array = runway_gates[runway]
+		if hit.is_empty() or main_shape == null or gates.size() != 2:
+			continue
+
+		var shape_size := (main_shape.shape as RectangleShape2D).size
+		var local_axis := Vector2(0.0, 1.0) if shape_size.y > shape_size.x else Vector2(1.0, 0.0)
+		var runway_axis := runway.global_transform.basis_xform(local_axis).normalized()
+		var local_position := main_shape.to_local(route_plane.global_position)
+		var on_runway := absf(local_position.x) <= shape_size.x * 0.5 and absf(local_position.y) <= shape_size.y * 0.5
+		var aligned := absf(route_direction.dot(runway_axis)) >= RUNWAY_END_ALIGNMENT
+
+		var gate_distance := (gates[0] as Node2D).global_position.distance_to((gates[1] as Node2D).global_position)
+		var max_age := gate_distance / maxf(route_speed, 1.0) * GATE_TIME_MAX_FACTOR + GATE_TIME_SLACK
+		var recent := physics_clock - float(hit["time"]) <= max_age
+
+		if on_runway and aligned and recent:
+			print("Landing accepted at route end: ", route_plane.name, " on ", runway.name)
+			gate_hits.clear()
+			_finish_landing()
+			return
 
 
 # Finds the two gate boxes of every runway. If you already made them in the
@@ -664,6 +719,7 @@ func _setup_runway_gates() -> void:
 			print("World: ", runway_name, " had no usable gate boxes, created 2 automatically.")
 
 		runway_gates[runway] = gates
+		runway_main_shapes[runway] = main_shape
 		for gate in gates:
 			if gate is Area2D:
 				(gate as Area2D).body_entered.connect(_on_gate_body_entered.bind(runway, gate))
@@ -725,6 +781,50 @@ func _on_gate_body_entered(body: Node2D, runway: Area2D, gate: Node2D) -> void:
 	gate_hits[runway] = {"gate": gate, "time": physics_clock}
 
 
+func _fire_fighter_shot(viewport_position: Vector2) -> void:
+	if physics_clock - last_shot_time < SHOT_COOLDOWN:
+		return
+	last_shot_time = physics_clock
+	var target := _plane_at_viewport_position(viewport_position, SHOT_RADIUS_PX)
+	if target != null:
+		_destroy_aircraft(target)
+
+
+func _destroy_aircraft(target: CharacterBody2D) -> void:
+	if target == route_plane:
+		route_confirmed = false
+		is_drawing_route = false
+		route_line.hide()
+		gate_hits.clear()
+		route_plane = null
+	if target == plane:
+		plane_landed = true
+
+	for i in range(aircraft.size()):
+		if aircraft[i]["plane"] == target:
+			aircraft.remove_at(i)
+			break
+
+	planes_destroyed += 1
+	var impact_position := target.global_position
+	target.queue_free()
+	if aircraft_collision_manager != null:
+		aircraft_collision_manager._play_explosion(impact_position)
+	_play_explosion_sound()
+	print("Plane shot down at ", impact_position, " | total destroyed: ", planes_destroyed)
+
+
+func _play_explosion_sound() -> void:
+	var stream := load(EXPLOSION_SOUND_PATH) as AudioStream
+	if stream == null:
+		return
+	var player := AudioStreamPlayer.new()
+	player.stream = stream
+	add_child(player)
+	player.finished.connect(player.queue_free)
+	player.play()
+
+
 func _setup_scoreboard() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "Scoreboard"
@@ -758,8 +858,8 @@ func _update_scoreboard() -> void:
 			planes_in_air += 1
 
 	var seconds := int(elapsed_game_time)
-	var text := "Landings: %d\nTime: %d:%02d\nPlanes in the air: %d\nFighter charges: %d" % [
-		total_landings, seconds / 60, seconds % 60, planes_in_air, fighter_charges
+	var text := "Landings: %d\nTime: %d:%02d\nPlanes in the air: %d\nFighter charges: %d\nPlanes shot down: %d" % [
+		total_landings, seconds / 60, seconds % 60, planes_in_air, fighter_charges, planes_destroyed
 	]
 	if ultimate_active:
 		text += "\nFIGHTER ACTIVE: %ds" % int(ceilf(ultimate_time_left))

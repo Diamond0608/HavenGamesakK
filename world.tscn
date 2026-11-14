@@ -1383,6 +1383,7 @@ tile_map_data = PackedByteArray("AAD9//n/AAAGAAgAAAD9//r/AAAGAAkAAAD9//v/AAAGAAo
 tile_set = SubResource("TileSet_bjt1f")
 
 [node name="CharacterBody2D2" type="CharacterBody2D" parent="." unique_id=819732364]
+visible = false
 position = Vector2(-11199, -854)
 rotation = 1.5693129
 scale = Vector2(13, 13)
