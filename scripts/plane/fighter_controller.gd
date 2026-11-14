@@ -1,6 +1,6 @@
 extends Node
 
-var world: Node
+var world
 var fighter_plane: CharacterBody2D
 
 var flight_speed: float = 850.0
