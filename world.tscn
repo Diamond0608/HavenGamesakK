@@ -1328,6 +1328,7 @@ tile_map_data = PackedByteArray("AAD9//n/AAAGAAgAAAD9//r/AAAGAAkAAAD9//v/AAAGAAo
 tile_set = SubResource("TileSet_bjt1f")
 
 [node name="CharacterBody2D2" type="CharacterBody2D" parent="." unique_id=819732364]
+position = Vector2(-11199, -854)
 rotation = 1.5693129
 scale = Vector2(13, 13)
 
@@ -1352,6 +1353,7 @@ scale = Vector2(24.213112, 7.559999)
 texture = ExtResource("11_ic0uy")
 
 [node name="fighterplane" type="CharacterBody2D" parent="." unique_id=2056133271]
+position = Vector2(-1551, 1387)
 script = ExtResource("13_70uel")
 
 [node name="Sprite2D" type="Sprite2D" parent="fighterplane" unique_id=601257315]
