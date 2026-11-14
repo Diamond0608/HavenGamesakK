@@ -571,6 +571,12 @@ func _follow_drawn_route(delta: float) -> void:
 			route_direction = (route_points[-1] - route_points[-2]).normalized()
 			if route_direction == Vector2.ZERO:
 				route_direction = Vector2.RIGHT
+
+		# A route may intentionally end on the runway instead of drawing all
+		# the way across it. Accept a centred, runway-aligned endpoint.
+		if _try_finish_landing_at_route_end():
+			return
+
 		route_confirmed = false
 		active_runway = null
 
@@ -629,6 +635,26 @@ func _update_runway_traversal() -> bool:
 	)
 	if not still_on_runway or not straight_and_centered:
 		active_runway = null
+	return false
+
+
+func _try_finish_landing_at_route_end() -> bool:
+	var runway := _get_runway_at_position(route_plane.global_position)
+	if runway == null:
+		return false
+
+	var local_position := runway.to_local(route_plane.global_position)
+	var half_size := (runway.shape as RectangleShape2D).size * 0.5
+	var local_direction := runway.global_transform.basis_xform_inv(route_direction).normalized()
+
+	var inside_runway_width := absf(local_position.y) <= half_size.y + RUNWAY_TRACK_TOLERANCE
+	var aligned_with_runway := absf(local_direction.y) <= sin(RUNWAY_HEADING_TOLERANCE)
+
+	if inside_runway_width and aligned_with_runway:
+		print("Landing accepted at route endpoint: ", route_plane.name, " on ", runway.get_path())
+		_finish_landing()
+		return true
+
 	return false
 
 
