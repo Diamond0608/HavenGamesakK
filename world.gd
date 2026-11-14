@@ -830,7 +830,7 @@ func _update_scoreboard() -> void:
 
 	var seconds := int(elapsed_game_time)
 	var landings_to_next_charge := FIRST_FIGHTER_LANDING_REWARD - total_landings if total_landings < FIRST_FIGHTER_LANDING_REWARD else FIGHTER_LANDING_INTERVAL - ((total_landings - FIRST_FIGHTER_LANDING_REWARD) % FIGHTER_LANDING_INTERVAL)
-	var text := "LANDINGS  %d\\nTIME  %d:%02d\\nAIRBORNE  %d\\nCOLLISIONS  %d\\nFIGHTER CHARGES  %d" % [
+	var text := "LANDINGS  %d\nTIME  %d:%02d\nAIRBORNE  %d\nCOLLISIONS  %d\nFIGHTER CHARGES  %d" % [
 		total_landings, seconds / 60, seconds % 60, planes_in_air, aircraft_collisions, fighter_charges
 	]
 	if ultimate_active:
