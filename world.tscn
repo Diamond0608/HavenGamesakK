@@ -13,6 +13,7 @@
 [ext_resource type="AudioStream" uid="uid://dr866eg46bxjj" path="res://freesound_community-sound-effect-flight-40467.mp3" id="11_2o6r5"]
 [ext_resource type="Texture2D" uid="uid://bk6w1b7b1r31n" path="res://airportterminals.jpg" id="11_ic0uy"]
 [ext_resource type="Texture2D" uid="uid://dome1hn00gr4b" path="res://fighterplane-removebg-preview.png" id="13_2o6r5"]
+[ext_resource type="Script" uid="uid://cgr87fqvys7xv" path="res://fighterplane.gd" id="13_70uel"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_gdvcf"]
 size = Vector2(562.5563, 61.683502)
@@ -1302,6 +1303,7 @@ scale = Vector2(24.213112, 7.559999)
 texture = ExtResource("11_ic0uy")
 
 [node name="fighterplane" type="CharacterBody2D" parent="." unique_id=2056133271]
+script = ExtResource("13_70uel")
 
 [node name="Sprite2D" type="Sprite2D" parent="fighterplane" unique_id=601257315]
 position = Vector2(-9787, -716)
