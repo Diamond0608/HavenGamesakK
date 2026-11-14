@@ -1129,15 +1129,15 @@ scale = Vector2(-13.092228, 11.51053)
 
 [node name="Sprite2D" type="Sprite2D" parent="AircraftCarrierNewRemovebgPreview" unique_id=33215964]
 
-[node name="CharacterBody2D" type="CharacterBody2D" parent="." unique_id=1557370611]
+[node name="Plane_Chamonix" type="CharacterBody2D" parent="." unique_id=1557370611]
 position = Vector2(-10397.001, 70.999756)
 scale = Vector2(1.0000001, 1.0000001)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="CharacterBody2D" unique_id=1250663287]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Plane_Chamonix" unique_id=1250663287]
 position = Vector2(3296, -303)
 shape = SubResource("RectangleShape2D_sbf0h")
 
-[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="CharacterBody2D" unique_id=575727198]
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="Plane_Chamonix" unique_id=575727198]
 z_index = 1
 position = Vector2(3303, -289)
 scale = Vector2(3, 3)
