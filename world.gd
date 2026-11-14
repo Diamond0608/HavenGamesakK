@@ -75,8 +75,8 @@ var runway_line_slope: float = 0.0
 const ROUTE_POINT_SPACING: float = 18.0
 const PLANE_TAP_RADIUS: float = 48.0
 const RUNWAY_ENTRY_MARGIN: float = 24.0
-const RUNWAY_HEADING_TOLERANCE: float = 0.10
-const RUNWAY_TRACK_TOLERANCE: float = 6.0
+const RUNWAY_HEADING_TOLERANCE: float = 0.22
+const RUNWAY_TRACK_TOLERANCE: float = 12.0
 
 
 func _ready() -> void:
@@ -576,7 +576,7 @@ func _update_runway_traversal() -> bool:
 		runway_entry_side = signf(entered_point.x)
 		runway_travel_sign = -runway_entry_side
 		var entry_local_direction := entered_runway.global_transform.basis_xform_inv(route_direction).normalized()
-		if entry_local_direction.x * runway_travel_sign <= 0.0 or absf(entry_local_direction.y) > 0.2:
+		if entry_local_direction.x * runway_travel_sign <= 0.0 or absf(entry_local_direction.y) > 0.25:
 			return false
 		active_runway = entered_runway
 		runway_entry_x = entered_point.x
