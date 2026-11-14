@@ -12,6 +12,7 @@
 [ext_resource type="Texture2D" uid="uid://bwwjh8k7e1g2l" path="res://grassnew.png" id="6_pkg7o"]
 [ext_resource type="AudioStream" uid="uid://dr866eg46bxjj" path="res://freesound_community-sound-effect-flight-40467.mp3" id="11_2o6r5"]
 [ext_resource type="Texture2D" uid="uid://bk6w1b7b1r31n" path="res://airportterminals.jpg" id="11_ic0uy"]
+[ext_resource type="Texture2D" uid="uid://dome1hn00gr4b" path="res://fighterplane-removebg-preview.png" id="13_2o6r5"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_gdvcf"]
 size = Vector2(562.5563, 61.683502)
@@ -1208,6 +1209,9 @@ animations = [{
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_vgx5x"]
 size = Vector2(60, 50)
 
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_sbf0h"]
+size = Vector2(13910.18, 109.37645)
+
 [node name="World" type="Node" unique_id=494113563]
 script = ExtResource("1_pkg7o")
 
@@ -1215,7 +1219,7 @@ script = ExtResource("1_pkg7o")
 z_index = 1
 z_as_relative = false
 position = Vector2(-4605, -3692)
-scale = Vector2(-10.254975, -13.099127)
+scale = Vector2(-10.49461, -13.099127)
 script = ExtResource("2_wse8f")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="AirportnewRemovebgPreview" unique_id=1021216443]
@@ -1296,3 +1300,16 @@ texture = ExtResource("11_ic0uy")
 position = Vector2(2198.9995, -2941)
 scale = Vector2(24.213112, 7.559999)
 texture = ExtResource("11_ic0uy")
+
+[node name="fighterplane" type="CharacterBody2D" parent="." unique_id=2056133271]
+
+[node name="Sprite2D" type="Sprite2D" parent="fighterplane" unique_id=601257315]
+position = Vector2(-9787, -716)
+scale = Vector2(4.5200024, 3.6799994)
+texture = ExtResource("13_2o6r5")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="fighterplane" unique_id=1238307189]
+position = Vector2(-9758.5, -723)
+rotation = -3.1415925
+scale = Vector2(0.12688553, -14.664948)
+shape = SubResource("RectangleShape2D_sbf0h")
