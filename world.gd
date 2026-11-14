@@ -1,5 +1,7 @@
-
 extends Node
+
+const PlaneMovementScript = preload("res://scripts/plane/plane_movement.gd")
+const WorldBoundsScript = preload("res://scripts/world/world_bounds.gd")
 
 @export var world_bounds: Rect2 = Rect2(
 	Vector2(-808, -488),
@@ -8,52 +10,58 @@ extends Node
 
 @export var initial_speed: float = 100.0
 @export var initial_direction: Vector2 = Vector2.RIGHT
+@export var max_speed: float = 20000.0
 
 @export var plane_path: NodePath = ^"CharacterBody2"
 
 var plane: CharacterBody2D
 var current_speed: float
 var direction: Vector2
+var bounds
 
 
 func _ready() -> void:
-	plane = get_node(plane_path) as CharacterBody2D
+	plane = get_node_or_null(plane_path) as CharacterBody2D
 
-	current_speed = initial_speed
+	if plane == null:
+		push_error("World: Plane not found at plane_path: " + str(plane_path))
+		set_physics_process(false)
+		return
+
+	bounds = WorldBoundsScript.new(world_bounds)
+
+	if not bounds.is_valid():
+		push_error("World: world_bounds must have a positive width and height.")
+		set_physics_process(false)
+		return
+
+	if initial_speed <= 0.0 or max_speed <= 0.0:
+		push_error("World: initial_speed and max_speed must be greater than zero.")
+		set_physics_process(false)
+		return
+
+	current_speed = minf(initial_speed, max_speed)
 	direction = initial_direction.normalized()
 
 	if direction == Vector2.ZERO:
 		direction = Vector2.RIGHT
 
+	plane.global_position = bounds.clamp_position(plane.global_position)
+
 
 func _physics_process(delta: float) -> void:
-	var next_position = plane.global_position + direction * current_speed * delta
-
-	var hit_x = (
-		next_position.x < world_bounds.position.x
-		or next_position.x > world_bounds.end.x
+	var result: Dictionary = PlaneMovementScript.advance(
+		plane.global_position,
+		direction,
+		current_speed,
+		delta,
+		world_bounds,
+		max_speed
 	)
 
-	var hit_y = (
-		next_position.y < world_bounds.position.y
-		or next_position.y > world_bounds.end.y
-	)
+	plane.global_position = result["position"]
+	direction = result["direction"]
+	current_speed = result["speed"]
 
-	if hit_x or hit_y:
-		direction = -direction
-		current_speed *= 2.0
-		plane.rotation += PI
-
-	next_position.x = clampf(
-		next_position.x,
-		world_bounds.position.x,
-		world_bounds.end.x
-	)
-
-	next_position.y = clampf(
-		next_position.y,
-		world_bounds.position.y,
-		world_bounds.end.y
-	)
-
-	plane.global_position = next_position
+	if result["bounces"] > 0:
+		plane.rotation += PI * float(result["bounces"])
