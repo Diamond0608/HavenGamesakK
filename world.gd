@@ -31,7 +31,7 @@ const AircraftCollisionManagerScript = preload("res://scripts/plane/aircraft_col
 @export_group("Fighter Ultimate")
 @export var fighter_plane_path: NodePath = ^"fighterplane"
 @export var fighter_flight_speed: float = 850.0
-@export var ultimate_duration: float = 20.0
+@export var ultimate_duration: float = 50.0
 @export var fighter_visual_rotation_offset_degrees: float = 0.0
 
 const FighterControllerScript = preload("res://scripts/plane/fighter_controller.gd")
@@ -81,11 +81,8 @@ const RUNWAY_PATHS: Array[String] = [
 	"AircraftCarrierNewRemovebgPreview"
 ]
 const GATE_DEPTH: float = 40.0              # thickness of auto-made gates, runway-local units
-const GATE_TIME_MIN_FACTOR: float = 0.5     # faster than half the expected time = rejected
-const GATE_TIME_MAX_FACTOR: float = 1.5     # slower than 1.5x the expected time = rejected
-const GATE_TIME_SLACK: float = 0.1          # extra seconds of forgiveness
-const LANDING_GRACE: float = 0.5            # seconds after the route ends that a landing can still count
-const RUNWAY_END_ALIGNMENT: float = 0.8     # route must end within about 35 degrees of the runway direction
+const FIRST_FIGHTER_LANDING_REWARD: int = 5
+const FIGHTER_LANDING_INTERVAL: int = 5
 
 # --- Fighter shooting -------------------------------------------------------
 const SHOT_RADIUS_PX: float = 80.0          # how close to a plane (in screen pixels) a click must be
@@ -94,6 +91,7 @@ const EXPLOSION_SOUND_PATH: String = "res://dragon-studio-boom-crash-487664.mp3"
 
 var scoreboard_label: Label
 var planes_destroyed: int = 0
+var aircraft_collisions: int = 0
 var last_shot_time: float = -100.0
 var physics_clock: float = 0.0
 var landing_window_until: float = 0.0
@@ -304,7 +302,8 @@ func _on_aircraft_collision(
 			route_line.hide()
 	if plane == first_plane or plane == second_plane:
 		plane_landed = true
-	print("Aircraft collision at ", impact_position, ". Both aircraft destroyed.")
+	aircraft_collisions += 1
+	print("Aircraft collision #", aircraft_collisions, " at ", impact_position, ". Both aircraft destroyed.")
 
 
 func _activate_ultimate() -> void:
@@ -564,6 +563,7 @@ func _start_route_trace(world_position: Vector2) -> void:
 	if not is_instance_valid(route_plane):
 		route_plane = plane
 	route_confirmed = false
+	gate_hits.clear()
 	route_points.clear()
 	route_points.append(route_plane.global_position)
 	if world_position.distance_to(route_plane.global_position) >= ROUTE_POINT_SPACING:
@@ -653,40 +653,8 @@ func _follow_drawn_route(delta: float) -> void:
 			if route_direction == Vector2.ZERO:
 				route_direction = Vector2.RIGHT
 		route_confirmed = false
-		# Area signals arrive after this function, so give the plane a moment
-		# to still get credit if the route ends right on the second gate.
-		landing_window_until = physics_clock + LANDING_GRACE
-		# A route may also end on the runway itself instead of crossing all of it.
-		_try_land_at_route_end()
-
-
-# The plane came in through one end gate, the route stopped while the plane is
-# on the runway, and it is pointing along the runway: that counts as a landing.
-func _try_land_at_route_end() -> void:
-	for key in runway_gates.keys():
-		var runway := key as Area2D
-		var hit: Dictionary = gate_hits.get(runway, {})
-		var main_shape := runway_main_shapes.get(runway) as CollisionShape2D
-		var gates: Array = runway_gates[runway]
-		if hit.is_empty() or main_shape == null or gates.size() != 2:
-			continue
-
-		var shape_size := (main_shape.shape as RectangleShape2D).size
-		var local_axis := Vector2(0.0, 1.0) if shape_size.y > shape_size.x else Vector2(1.0, 0.0)
-		var runway_axis := runway.global_transform.basis_xform(local_axis).normalized()
-		var local_position := main_shape.to_local(route_plane.global_position)
-		var on_runway := absf(local_position.x) <= shape_size.x * 0.5 and absf(local_position.y) <= shape_size.y * 0.5
-		var aligned := absf(route_direction.dot(runway_axis)) >= RUNWAY_END_ALIGNMENT
-
-		var gate_distance := (gates[0] as Node2D).global_position.distance_to((gates[1] as Node2D).global_position)
-		var max_age := gate_distance / maxf(route_speed, 1.0) * GATE_TIME_MAX_FACTOR + GATE_TIME_SLACK
-		var recent := physics_clock - float(hit["time"]) <= max_age
-
-		if on_runway and aligned and recent:
-			print("Landing accepted at route end: ", route_plane.name, " on ", runway.name)
-			gate_hits.clear()
-			_finish_landing()
-			return
+		# Keep the two-gate detector active after the drawn route ends. The plane
+		# can still reach the second gate on a later physics frame.
 
 
 # Finds the two gate boxes of every runway. If you already made them in the
@@ -695,13 +663,16 @@ func _try_land_at_route_end() -> void:
 func _setup_runway_gates() -> void:
 	for runway_name in RUNWAY_PATHS:
 		var runway := get_node_or_null(runway_name) as Area2D
-		var main_shape := get_node_or_null(runway_name + "/CollisionShape2D") as CollisionShape2D
-		if runway == null or main_shape == null or not main_shape.shape is RectangleShape2D:
-			push_warning("World: could not set up gates for " + runway_name)
+		if runway == null:
+			push_warning("World: runway Area2D not found: " + runway_name)
 			continue
 
+		var main_shape := runway.get_node_or_null("CollisionShape2D") as CollisionShape2D
 		var gates: Array[Node2D] = []
 		var uses_shape_signal := false
+
+		# Prefer the two CollisionShape2D children you place manually. The
+		# original CollisionShape2D is treated as the runway's main shape.
 		for child in runway.get_children():
 			if child is Area2D:
 				gates.append(child as Area2D)
@@ -709,23 +680,27 @@ func _setup_runway_gates() -> void:
 				gates.append(child as CollisionShape2D)
 				uses_shape_signal = true
 
-		if gates.size() == 2:
-			print("World: ", runway_name, " is using your 2 existing gate boxes: ", gates[0].name, ", ", gates[1].name)
-		else:
-			for gate in gates:
-				push_warning("World: ignoring " + str(gate.name) + " on " + runway_name + " (need exactly 2 gate boxes).")
-			gates = _create_runway_gates(runway, main_shape)
+		if gates.size() != 2:
+			gates.clear()
 			uses_shape_signal = false
-			print("World: ", runway_name, " had no usable gate boxes, created 2 automatically.")
+			if main_shape != null and main_shape.shape is RectangleShape2D:
+				gates = _create_runway_gates(runway, main_shape)
+				print("World: ", runway_name, " created two automatic gate shapes.")
+			else:
+				push_warning("World: add exactly two gate CollisionShape2D children to " + runway_name + ".")
+				continue
+		else:
+			print("World: ", runway_name, " using gate shapes: ", gates[0].name, " and ", gates[1].name)
 
+		runway.monitoring = true
 		runway_gates[runway] = gates
-		runway_main_shapes[runway] = main_shape
 		for gate in gates:
 			if gate is Area2D:
-				(gate as Area2D).body_entered.connect(_on_gate_body_entered.bind(runway, gate))
+				var gate_area := gate as Area2D
+				gate_area.monitoring = true
+				gate_area.body_entered.connect(_on_gate_body_entered.bind(runway, gate))
 		if uses_shape_signal:
 			runway.body_shape_entered.connect(_on_runway_shape_entered.bind(runway))
-
 
 func _create_runway_gates(runway: Area2D, main_shape: CollisionShape2D) -> Array[Node2D]:
 	var made: Array[Node2D] = []
@@ -761,25 +736,20 @@ func _on_runway_shape_entered(_body_rid: RID, body: Node2D, _body_shape_index: i
 
 
 func _on_gate_body_entered(body: Node2D, runway: Area2D, gate: Node2D) -> void:
-	if body != route_plane or physics_clock > landing_window_until:
+	# Only the currently routed aircraft can land. The same plane must overlap
+	# both distinct end gates; no frame/time estimate can reject a valid pass.
+	if body != route_plane or not route_plane.visible or _is_aircraft_landed(route_plane):
 		return
-	var previous: Dictionary = gate_hits.get(runway, {})
-	if not previous.is_empty() and previous["gate"] != gate:
-		var elapsed := physics_clock - float(previous["time"])
-		var gate_distance := (previous["gate"] as Node2D).global_position.distance_to(gate.global_position)
-		var expected := gate_distance / maxf(route_speed, 1.0)
-		var in_window := (
-			elapsed >= expected * GATE_TIME_MIN_FACTOR
-			and elapsed <= expected * GATE_TIME_MAX_FACTOR + GATE_TIME_SLACK
-		)
-		print("Gate hit 2/2 on ", runway.name, " | elapsed: ", snappedf(elapsed, 0.001), "s | expected: ", snappedf(expected, 0.001), "s | accepted: ", in_window)
-		if in_window:
-			print("Landing accepted: ", route_plane.name, " on ", runway.name)
-			gate_hits.clear()
-			_finish_landing()
-			return
-	gate_hits[runway] = {"gate": gate, "time": physics_clock}
 
+	var previous: Dictionary = gate_hits.get(runway, {})
+	if not previous.is_empty() and previous.get("gate") != gate:
+		print("Landing accepted: ", route_plane.name, " overlapped both gates on ", runway.name)
+		gate_hits.clear()
+		_finish_landing()
+		return
+
+	gate_hits[runway] = {"gate": gate, "time": physics_clock}
+	print("Landing gate 1/2: ", gate.name, " on ", runway.name, " | aircraft: ", route_plane.name)
 
 func _fire_fighter_shot(viewport_position: Vector2) -> void:
 	if physics_clock - last_shot_time < SHOT_COOLDOWN:
@@ -837,12 +807,13 @@ func _setup_scoreboard() -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.0, 0.0, 0.0, 0.55)
 	style.set_corner_radius_all(10)
-	style.set_content_margin_all(14.0)
+	style.set_content_margin_all(10.0)
 	panel.add_theme_stylebox_override("panel", style)
 
 	scoreboard_label = Label.new()
 	scoreboard_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	scoreboard_label.add_theme_font_size_override("font_size", 28)
+	scoreboard_label.add_theme_font_size_override("font_size", 18)
+	scoreboard_label.add_theme_constant_override("line_spacing", 2)
 	panel.add_child(scoreboard_label)
 	layer.add_child(panel)
 	_update_scoreboard()
@@ -858,13 +829,14 @@ func _update_scoreboard() -> void:
 			planes_in_air += 1
 
 	var seconds := int(elapsed_game_time)
-	var text := "Landings: %d\nTime: %d:%02d\nPlanes in the air: %d\nFighter charges: %d\nPlanes shot down: %d" % [
-		total_landings, seconds / 60, seconds % 60, planes_in_air, fighter_charges, planes_destroyed
+	var landings_to_next_charge := FIRST_FIGHTER_LANDING_REWARD - total_landings if total_landings < FIRST_FIGHTER_LANDING_REWARD else FIGHTER_LANDING_INTERVAL - ((total_landings - FIRST_FIGHTER_LANDING_REWARD) % FIGHTER_LANDING_INTERVAL)
+	var text := "LANDINGS  %d\\nTIME  %d:%02d\\nAIRBORNE  %d\\nCOLLISIONS  %d\\nFIGHTER CHARGES  %d" % [
+		total_landings, seconds / 60, seconds % 60, planes_in_air, aircraft_collisions, fighter_charges
 	]
 	if ultimate_active:
 		text += "\nFIGHTER ACTIVE: %ds" % int(ceilf(ultimate_time_left))
 	else:
-		text += "\nNext fighter charge in: %d" % (10 - total_landings % 10)
+		text += "\nNEXT FIGHTER IN  %d LANDINGS" % landings_to_next_charge
 	scoreboard_label.text = text
 
 
@@ -877,7 +849,7 @@ func _finish_landing() -> void:
 			break
 
 	total_landings += 1
-	if total_landings % 10 == 0:
+	if total_landings >= FIRST_FIGHTER_LANDING_REWARD and (total_landings - FIRST_FIGHTER_LANDING_REWARD) % FIGHTER_LANDING_INTERVAL == 0:
 		fighter_charges += 1
 		print("Fighter ability unlocked! Total landings: ", total_landings, " | charges: ", fighter_charges)
 
